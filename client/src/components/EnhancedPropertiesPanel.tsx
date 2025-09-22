@@ -78,6 +78,7 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+
   // Initial form data for new attributes
   const initialAttributeForm: AttributeFormData = {
     name: "",

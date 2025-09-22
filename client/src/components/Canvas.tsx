@@ -1794,6 +1794,9 @@ function CanvasComponent() {
           {/* Auto Layout Manager */}
           {showAutoLayout && nodes.length > 0 && (
             <AutoLayoutManager 
+              nodes={nodes}
+              edges={edges}
+              setNodes={setNodes}
               onLayoutApplied={() => {
                 // Save layout changes to history
                 setTimeout(() => {

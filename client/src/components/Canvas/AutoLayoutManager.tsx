@@ -3,10 +3,12 @@ import { Node, Edge, useReactFlow } from 'reactflow';
 import { Grid, Shuffle, GitBranch, Target, Layers, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useModelerStore } from '@/store/modelerStore';
 import { Badge } from '@/components/ui/badge';
 
 interface AutoLayoutManagerProps {
+  nodes: Node[];
+  edges: Edge[];
+  setNodes: (nodes: Node[]) => void;
   onLayoutApplied?: () => void;
 }
 
@@ -20,8 +22,7 @@ const layoutAlgorithms = {
   system: 'System Groups'
 };
 
-export default function AutoLayoutManager({ onLayoutApplied }: AutoLayoutManagerProps) {
-  const { nodes, edges, setNodes } = useModelerStore();
+export default function AutoLayoutManager({ nodes, edges, setNodes, onLayoutApplied }: AutoLayoutManagerProps) {
   const { fitView } = useReactFlow();
 
   // Calculate hierarchical layout based on relationships
