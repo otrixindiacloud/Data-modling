@@ -92,7 +92,7 @@ function CanvasComponent() {
   const [showAISuggestions, setShowAISuggestions] = useState(false);
   const [showMobileGestures, setShowMobileGestures] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
-  const [showAutoLayout, setShowAutoLayout] = useState(true);
+  const [showAutoLayout, setShowAutoLayout] = useState(false);
   
   // New state for attribute relationship modal
   const [showAttributeRelationshipModal, setShowAttributeRelationshipModal] = useState(false);
