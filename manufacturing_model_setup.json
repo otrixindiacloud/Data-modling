@@ -1,0 +1,143 @@
+{
+  "model": {
+    "name": "Manufacturing ERP System",
+    "layer": "conceptual",
+    "targetSystem": "Operational Database"
+  },
+  "objects": [
+    {
+      "name": "MI_REQUESTS",
+      "description": "Manufacturing requests table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 100, "y": 100},
+      "attributes": [
+        {"name": "REQUEST_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "REQUEST_DATE", "conceptualType": "Date", "logicalType": "DATE", "physicalType": "DATE", "nullable": true, "isPrimaryKey": false}
+      ]
+    },
+    {
+      "name": "MI_REQUEST_OUTPUT_MATERIALS",
+      "description": "Request output materials table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 400, "y": 100},
+      "attributes": [
+        {"name": "OUTPUT_MATERIAL_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "REQUEST_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "WORKORDER_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "WORKORDER_NO", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "OUTPUT_MATERIAL", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_SIZE", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_UOM", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_REMAINING", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "QTY_TO_PRODUCTED", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "REQUESTED_QTY", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false}
+      ]
+    },
+    {
+      "name": "MI_WORKORDERS",
+      "description": "Manufacturing work orders table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 700, "y": 100},
+      "attributes": [
+        {"name": "WORKORDER_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "WORKORDER_NO", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "OUTPUT_MATERIAL", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "START_DATE", "conceptualType": "Date", "logicalType": "DATE", "physicalType": "DATE", "nullable": true, "isPrimaryKey": false},
+        {"name": "END_DATE", "conceptualType": "Date", "logicalType": "DATE", "physicalType": "DATE", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_SIZE", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_UOM", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "BATCH_REMAINING", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "QTY_TO_PRODUCTED", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "STATUS", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false}
+      ]
+    },
+    {
+      "name": "MI_REQUEST_RAW_MATERIALS",
+      "description": "Request raw materials table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 100, "y": 400},
+      "attributes": [
+        {"name": "REQUEST_RAW_MATERIAL_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "REQUEST_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "OUTPUT_MATERIAL_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "WORKORDER_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "WORKORDER_NO", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "OUTPUT_MATERIAL", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "RAW_MATERIAL_CODE", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "RAW_MATERIAL_DESCRIPTION", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(255 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "REQUIRED_QTY", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "UOM", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "REQUESTED_QTY", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false}
+      ]
+    },
+    {
+      "name": "MI_WORKORDER_MATERIALS",
+      "description": "Work order materials table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 400, "y": 400},
+      "attributes": [
+        {"name": "ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "WORKORDER_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "RAW_MATERIAL_CODE", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "RAW_MATERIAL_DESCRIPTION", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(255 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "REQUIRED_QTY", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false},
+        {"name": "UOM", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false}
+      ]
+    },
+    {
+      "name": "MI_CONSUMPTION_RAW_MATERIAL",
+      "description": "Raw material consumption table",
+      "domainId": 25,
+      "dataAreaId": 27,
+      "position": {"x": 700, "y": 400},
+      "attributes": [
+        {"name": "CONSUMPTION_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": false, "isPrimaryKey": true},
+        {"name": "CONSUMPTION_DATE", "conceptualType": "Date", "logicalType": "DATE", "physicalType": "DATE", "nullable": true, "isPrimaryKey": false},
+        {"name": "WORKORDER_ID", "conceptualType": "Identifier", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false, "isForeignKey": true},
+        {"name": "WORKORDER_NO", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "OUTPUT_MATERIAL", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "RAW_MATERIAL_CODE", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "RAW_MATERIAL_DESCRIPTION", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(255 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "UOM", "conceptualType": "Text", "logicalType": "VARCHAR2", "physicalType": "VARCHAR2(100 CHAR)", "nullable": true, "isPrimaryKey": false},
+        {"name": "CONSUMPTION_QTY", "conceptualType": "Number", "logicalType": "NUMBER", "physicalType": "NUMBER", "nullable": true, "isPrimaryKey": false}
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "source": "MI_REQUESTS",
+      "target": "MI_REQUEST_OUTPUT_MATERIALS",
+      "type": "1:N",
+      "description": "One request can have many output materials"
+    },
+    {
+      "source": "MI_REQUEST_OUTPUT_MATERIALS",
+      "target": "MI_WORKORDERS",
+      "type": "1:N",
+      "description": "One output material can have many work orders"
+    },
+    {
+      "source": "MI_WORKORDERS",
+      "target": "MI_WORKORDER_MATERIALS",
+      "type": "1:N",
+      "description": "One work order can have many materials"
+    },
+    {
+      "source": "MI_WORKORDERS",
+      "target": "MI_REQUEST_RAW_MATERIALS",
+      "type": "1:N",
+      "description": "One work order can have many raw material requests"
+    },
+    {
+      "source": "MI_WORKORDERS",
+      "target": "MI_CONSUMPTION_RAW_MATERIAL",
+      "type": "1:N",
+      "description": "One work order can have many consumption records"
+    }
+  ]
+}

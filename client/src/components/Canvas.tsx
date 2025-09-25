@@ -79,6 +79,11 @@ function CanvasComponent() {
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [connectionMode, setConnectionMode] = useState<'selection' | 'connection'>('selection');
+  
+  // Debug connection mode changes
+  useEffect(() => {
+    console.log("Connection mode changed to:", connectionMode);
+  }, [connectionMode]);
   const [pendingConnection, setPendingConnection] = useState<{ source: string; target: string } | null>(null);
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
   const [relationshipType, setRelationshipType] = useState<'1:1' | '1:N' | 'N:M'>('1:N');
@@ -397,6 +402,7 @@ function CanvasComponent() {
 
           // Ensure we have a current model selected
           if (!currentModel) {
+            console.error('No current model selected when trying to add object:', object.name);
             toast({
               title: "No Active Model Selected",
               description: "Please select a data model before adding objects to the canvas.",
@@ -405,14 +411,39 @@ function CanvasComponent() {
             return;
           }
 
-          // Add to local state first for immediate visual feedback
-          setNodes((nds) => [...nds, newNode]);
-          
+          // Check if we have a valid layer model
+          if (!currentLayerModel) {
+            console.error('No current layer model found:', {
+              currentModel: currentModel?.id,
+              currentLayer,
+              objectName: object.name
+            });
+            // Try to use the current model as fallback
+            if (currentModel) {
+              console.log('Using current model as fallback:', currentModel.id);
+            } else {
+              toast({
+                title: "Model Layer Not Found",
+                description: `The current model doesn't have a ${currentLayer} layer. Please check your model configuration.`,
+                variant: "destructive"
+              });
+              return;
+            }
+          }
+
           console.log('✓ Node added to canvas via touchDrop:', newNode.id);
 
           // Save to database - create data_model_object entry
           const targetModelId = object.layerModelId || currentLayerModel?.id || currentModel?.id;
           if (targetModelId) {
+            console.log('Adding object to model:', {
+              objectId: object.id,
+              objectName: object.name,
+              targetModelId,
+              currentModel: currentModel?.id,
+              currentLayerModel: currentLayerModel?.id,
+              currentLayer
+            });
             fetch(`/api/models/${targetModelId}/objects`, {
               method: 'POST',
               headers: {
@@ -421,7 +452,7 @@ function CanvasComponent() {
               body: JSON.stringify({
                 objectId: object.id,
                 position: position,
-                targetSystem: object.targetSystem,
+                targetSystem: object.targetSystemId || null,
                 isVisible: true,
                 layerSpecificConfig: {
                   position: position,
@@ -429,13 +460,27 @@ function CanvasComponent() {
                 }
               }),
             })
-            .then(response => {
+            .then(async response => {
+              console.log('Response status:', response.status, 'OK:', response.ok);
               if (!response.ok) {
-                throw new Error(`Failed to add object to model: ${response.statusText}`);
+                if (response.status === 409) {
+                  // Object already exists in model - this is not an error
+                  console.log('Object already exists in model, continuing...');
+                  return { success: true, alreadyExists: true };
+                }
+                // Get the actual error message from the response
+                try {
+                  const errorData = await response.json();
+                  console.log('Error data:', errorData);
+                  throw new Error(errorData.message || response.statusText);
+                } catch (parseError) {
+                  console.log('Parse error:', parseError);
+                  throw new Error(response.statusText);
+                }
               }
               return response.json();
             })
-            .then(() => {
+            .then((result) => {
               // Invalidate canvas query to refresh data
               queryClient.invalidateQueries({
                 queryKey: ["/api/models", targetModelId, "canvas", currentLayer]
@@ -453,24 +498,38 @@ function CanvasComponent() {
                 detail: { objectId: object.id, forceUpdate: true }
               }));
               
-              toast({
-                title: "✓ Object Added Successfully",
-                description: `${object.name} has been added to the canvas.`
-              });
+              if (result?.alreadyExists) {
+                toast({
+                  title: "✓ Object Already in Canvas",
+                  description: `${object.name} is already displayed on the canvas.`
+                });
+              } else {
+                toast({
+                  title: "✓ Object Added Successfully",
+                  description: `${object.name} has been added to the canvas.`
+                });
+              }
             })
             .catch(error => {
               console.error('Failed to save object to database:', error);
-              // Remove from local state if database save failed
-              setNodes((nds) => nds.filter(n => n.id !== newNode.id));
+              console.error('Error details:', {
+                objectId: object.id,
+                objectName: object.name,
+                targetModelId,
+                error: error.message,
+                currentModel: currentModel?.id,
+                currentLayerModel: currentLayerModel?.id,
+                currentLayer
+              });
+              // Don't add to local state if database save failed
               toast({
                 title: "Failed to Add Object",
-                description: `Could not save ${object.name} to the database.`,
+                description: `Could not save ${object.name} to the database. ${error.message}`,
                 variant: "destructive"
               });
             });
           } else {
             console.error('No current model to add object to');
-            setNodes((nds) => nds.filter(n => n.id !== newNode.id));
             toast({
               title: "No Active Model",
               description: "Please select a model before adding objects.",
@@ -857,6 +916,7 @@ function CanvasComponent() {
 
   const onConnect = useCallback(
     (params: Connection) => {
+      console.log("Connection attempt:", { params, connectionMode, currentLayer });
       if (!params.source || !params.target) return;
       
       // Check if this is an attribute-level connection (for logical/physical layers)
@@ -1337,12 +1397,33 @@ function CanvasComponent() {
 
         // Check if we have a current model selected
         if (!currentModel) {
+          console.error('No current model selected when trying to add object:', object.name);
           toast({
             title: "No Active Model Selected",
             description: "Please select a data model before adding objects to the canvas.",
             variant: "destructive"
           });
           return;
+        }
+
+        // Check if we have a valid layer model
+        if (!currentLayerModel) {
+          console.error('No current layer model found:', {
+            currentModel: currentModel?.id,
+            currentLayer,
+            objectName: object.name
+          });
+          // Try to use the current model as fallback
+          if (currentModel) {
+            console.log('Using current model as fallback:', currentModel.id);
+          } else {
+            toast({
+              title: "Model Layer Not Found",
+              description: `The current model doesn't have a ${currentLayer} layer. Please check your model configuration.`,
+              variant: "destructive"
+            });
+            return;
+          }
         }
 
         // Check if node already exists - improve detection
@@ -1369,14 +1450,19 @@ function CanvasComponent() {
           return;
         }
 
-        // Add to local state first for immediate visual feedback
-        setNodes((nds) => [...nds, newNode]);
-        
         console.log('✓ Node added to canvas:', newNode.id);
 
         // Save to database - create data_model_object entry
         const targetModelId = object.layerModelId || currentLayerModel?.id || currentModel?.id;
         if (targetModelId) {
+          console.log('Adding object to model:', {
+            objectId: object.id,
+            objectName: object.name,
+            targetModelId,
+            currentModel: currentModel?.id,
+            currentLayerModel: currentLayerModel?.id,
+            currentLayer
+          });
           fetch(`/api/models/${targetModelId}/objects`, {
             method: 'POST',
             headers: {
@@ -1385,7 +1471,7 @@ function CanvasComponent() {
             body: JSON.stringify({
               objectId: object.id,
               position: position,
-              targetSystem: object.targetSystem,
+              targetSystem: object.targetSystemId || null,
               isVisible: true,
               layerSpecificConfig: {
                 position: position,
@@ -1393,39 +1479,72 @@ function CanvasComponent() {
               }
             }),
           })
-          .then(response => {
+          .then(async response => {
+            console.log('Response status:', response.status, 'OK:', response.ok);
             if (!response.ok) {
-              throw new Error(`Failed to add object to model: ${response.statusText}`);
+              if (response.status === 409) {
+                // Object already exists in model - this is not an error
+                console.log('Object already exists in model, continuing...');
+                return { success: true, alreadyExists: true };
+              }
+              // Get the actual error message from the response
+              try {
+                const errorData = await response.json();
+                console.log('Error data:', errorData);
+                throw new Error(errorData.message || response.statusText);
+              } catch (parseError) {
+                console.log('Parse error:', parseError);
+                throw new Error(response.statusText);
+              }
             }
             return response.json();
           })
-          .then(() => {
-            // Invalidate canvas query to refresh data
-            queryClient.invalidateQueries({
-              queryKey: ["/api/models", targetModelId, "canvas", currentLayer]
-            });
-            
-            // Save to history
-            saveToHistory('node_added', `Added ${object.name} to canvas`, 
-              `Dragged ${object.name} from sidebar to canvas`);
-            
-            toast({
-              title: "✓ Object Added Successfully", 
-              description: `${object.name} has been added to the canvas. Click on it to edit properties.`
-            });
-            
-            // Auto-select the new node
-            setTimeout(() => {
-              selectNode(newNode.id);
-            }, 200);
-          })
+            .then((result) => {
+              // Add to local state only after successful database operation
+              setNodes((nds) => [...nds, newNode]);
+              
+              // Invalidate canvas query to refresh data
+              queryClient.invalidateQueries({
+                queryKey: ["/api/models", targetModelId, "canvas", currentLayer]
+              });
+              
+              // Save to history
+              saveToHistory('node_added', `Added ${object.name} to canvas`, 
+                `Dragged ${object.name} from sidebar to canvas`);
+              
+              if (result?.alreadyExists) {
+                toast({
+                  title: "✓ Object Already in Canvas",
+                  description: `${object.name} is already displayed on the canvas.`
+                });
+              } else {
+                toast({
+                  title: "✓ Object Added Successfully", 
+                  description: `${object.name} has been added to the canvas. Click on it to edit properties.`
+                });
+              }
+              
+              // Auto-select the new node
+              setTimeout(() => {
+                selectNode(newNode.id);
+              }, 200);
+            })
           .catch(error => {
             console.error('Failed to save object to database:', error);
+            console.error('Error details:', {
+              objectId: object.id,
+              objectName: object.name,
+              targetModelId,
+              error: error.message,
+              currentModel: currentModel?.id,
+              currentLayerModel: currentLayerModel?.id,
+              currentLayer
+            });
             // Remove from local state if database save failed
             setNodes((nds) => nds.filter(n => n.id !== newNode.id));
             toast({
               title: "Failed to Add Object",
-              description: `Could not save ${object.name} to the database.`,
+              description: `Could not save ${object.name} to the database. ${error.message}`,
               variant: "destructive"
             });
           });
@@ -1696,7 +1815,7 @@ function CanvasComponent() {
             nodeTypes={nodeTypes}
             fitView
             attributionPosition="bottom-left"
-            connectionMode={"strict" as any}
+            connectionMode={connectionMode === 'connection' ? "loose" : "strict" as any}
             snapToGrid={true}
             snapGrid={[15, 15]}
             connectionLineType={"smoothstep" as any}

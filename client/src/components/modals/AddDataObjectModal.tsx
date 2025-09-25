@@ -78,16 +78,45 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
       const allModels = await allModelsResponse.json();
       
       // Find the model family (conceptual + logical + physical)
-      const modelFamily = allModels.filter((model: any) => 
-        model.parentModelId === currentModel.id || model.id === currentModel.id
-      );
+      let modelFamily: any[] = [];
+      
+      if (currentModel.layer === "conceptual") {
+        // If current model is conceptual, find its logical and physical children
+        modelFamily = allModels.filter((model: any) => 
+          model.id === currentModel.id || model.parentModelId === currentModel.id
+        );
+      } else if (currentModel.layer === "logical" || currentModel.layer === "physical") {
+        // If current model is logical/physical, find the conceptual parent and all siblings
+        const conceptualParent = allModels.find((model: any) => 
+          model.id === currentModel.parentModelId && model.layer === "conceptual"
+        );
+        
+        if (conceptualParent) {
+          modelFamily = allModels.filter((model: any) => 
+            model.id === conceptualParent.id || model.parentModelId === conceptualParent.id
+          );
+        } else {
+          // Fallback: if no conceptual parent found, use current model
+          modelFamily = [currentModel];
+        }
+      } else {
+        // Fallback: use current model only
+        modelFamily = [currentModel];
+      }
       
       const conceptualModel = modelFamily.find((m: any) => m.layer === "conceptual");
       const logicalModel = modelFamily.find((m: any) => m.layer === "logical");
       const physicalModel = modelFamily.find((m: any) => m.layer === "physical");
       
       if (!conceptualModel || !logicalModel || !physicalModel) {
-        throw new Error("Model family incomplete - missing conceptual, logical, or physical layer");
+        console.error("Model family detection failed:", {
+          currentModel,
+          modelFamily,
+          conceptualModel,
+          logicalModel,
+          physicalModel
+        });
+        throw new Error(`Model family incomplete - missing conceptual, logical, or physical layer. Found: conceptual=${!!conceptualModel}, logical=${!!logicalModel}, physical=${!!physicalModel}`);
       }
 
       // Create objects in all three layers
@@ -177,7 +206,7 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
         for (const attr of attrData) {
           if (attr.name.trim()) {
             // Create in logical layer
-            await fetch("/api/attributes", {
+            const logicalAttrResponse = await fetch("/api/attributes", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -186,9 +215,14 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
                 orderIndex: attrData.indexOf(attr)
               })
             });
+            
+            if (!logicalAttrResponse.ok) {
+              const errorData = await logicalAttrResponse.json();
+              throw new Error(`Failed to create logical attribute: ${errorData.message}`);
+            }
 
             // Create in physical layer
-            await fetch("/api/attributes", {
+            const physicalAttrResponse = await fetch("/api/attributes", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -197,6 +231,11 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
                 orderIndex: attrData.indexOf(attr)
               })
             });
+            
+            if (!physicalAttrResponse.ok) {
+              const errorData = await physicalAttrResponse.json();
+              throw new Error(`Failed to create physical attribute: ${errorData.message}`);
+            }
           }
         }
       }

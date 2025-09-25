@@ -516,9 +516,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid objectId is required" });
       }
       
-      // Check if object already exists in this model
+      // Check if object already exists in this specific model
       const existingModelObjects = await storage.getDataModelObjects();
-      const existingEntry = existingModelObjects.find(mo => mo.objectId === objectId);
+      const existingEntry = existingModelObjects.find(mo => mo.objectId === objectId && mo.modelId === modelId);
       
       if (existingEntry) {
         return res.status(409).json({ message: "Object already exists in this model" });
@@ -544,7 +544,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(dataModelObject);
     } catch (error) {
       console.error("Error adding object to model:", error);
-      res.status(500).json({ message: "Failed to add object to model" });
+      console.error("Error details:", {
+        modelId: req.params.modelId,
+        objectId: req.body.objectId,
+        error: error.message,
+        stack: error.stack
+      });
+      res.status(500).json({ 
+        message: "Failed to add object to model",
+        error: error.message 
+      });
     }
   });
 
@@ -646,9 +655,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/objects/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      console.log(`Attempting to delete object ${id}`);
+      
+      // First, delete all data model objects associated with this object
+      console.log(`Deleting data model objects for object ${id}`);
+      await storage.deleteDataModelObjectsByObject(id);
+      console.log(`Successfully deleted data model objects for object ${id}`);
+      
+      // Second, delete all attributes associated with this object
+      console.log(`Deleting attributes for object ${id}`);
+      await storage.deleteAttributesByObject(id);
+      console.log(`Successfully deleted attributes for object ${id}`);
+      
+      // Finally, delete the object itself
+      console.log(`Deleting object ${id}`);
       await storage.deleteDataObject(id);
+      console.log(`Successfully deleted object ${id}`);
+      
       res.status(204).send();
     } catch (error) {
+      console.error("Error deleting object:", error);
       res.status(500).json({ message: "Failed to delete object" });
     }
   });

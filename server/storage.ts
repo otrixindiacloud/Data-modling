@@ -68,6 +68,7 @@ export interface IStorage {
   createDataObject(object: InsertDataObject): Promise<DataObject>;
   updateDataObject(id: number, object: Partial<InsertDataObject>): Promise<DataObject>;
   deleteDataObject(id: number): Promise<void>;
+  deleteDataModelObjectsByObject(objectId: number): Promise<void>;
 
   // Data Model Objects
   getDataModelObjects(): Promise<DataModelObject[]>;
@@ -84,6 +85,7 @@ export interface IStorage {
   createAttribute(attribute: InsertAttribute): Promise<Attribute>;
   updateAttribute(id: number, attribute: Partial<InsertAttribute>): Promise<Attribute>;
   deleteAttribute(id: number): Promise<void>;
+  deleteAttributesByObject(objectId: number): Promise<void>;
 
   // Data Model Attributes
   getDataModelAttributes(): Promise<DataModelAttribute[]>;
@@ -229,6 +231,10 @@ export class Storage implements IStorage {
     await db.delete(dataObjects).where(eq(dataObjects.id, id));
   }
 
+  async deleteDataModelObjectsByObject(objectId: number): Promise<void> {
+    await db.delete(dataModelObjects).where(eq(dataModelObjects.objectId, objectId));
+  }
+
   async getDataObjectsByModel(modelId: number): Promise<DataObject[]> {
     const result = await db
       .select({
@@ -296,6 +302,10 @@ export class Storage implements IStorage {
 
   async deleteAttribute(id: number): Promise<void> {
     await db.delete(attributes).where(eq(attributes.id, id));
+  }
+
+  async deleteAttributesByObject(objectId: number): Promise<void> {
+    await db.delete(attributes).where(eq(attributes.objectId, objectId));
   }
 
   async getAttributesByObject(objectId: number): Promise<Attribute[]> {
