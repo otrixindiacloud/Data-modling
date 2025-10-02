@@ -111,7 +111,9 @@ export interface IStorage {
 
   // Configurations
   getConfigurations(): Promise<Configuration[]>;
+  getConfigurationsByCategory(category: string): Promise<Configuration[]>;
   getConfiguration(category: string, key: string): Promise<Configuration | undefined>;
+  getConfigurationByCategoryAndKey(category: string, key: string): Promise<Configuration | undefined>;
   createConfiguration(config: InsertConfiguration): Promise<Configuration>;
   updateConfiguration(id: number, config: Partial<InsertConfiguration>): Promise<Configuration>;
   deleteConfiguration(id: number): Promise<void>;
@@ -392,6 +394,10 @@ export class Storage implements IStorage {
   // Configurations
   async getConfigurations(): Promise<Configuration[]> {
     return await db.select().from(configurations);
+  }
+
+  async getConfigurationsByCategory(category: string): Promise<Configuration[]> {
+    return await db.select().from(configurations).where(eq(configurations.category, category));
   }
 
   async getConfiguration(category: string, key: string): Promise<Configuration | undefined> {

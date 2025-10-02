@@ -358,15 +358,6 @@ export default function ConfigurationPage() {
           <Settings className="h-6 w-6" />
           <h1 className="text-2xl font-bold">Configuration</h1>
         </div>
-        <div>
-          <Button
-            onClick={() => setLocation("/enhanced-config")}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-          >
-            <Settings className="h-4 w-4 mr-2" />
-            Advanced Configuration
-          </Button>
-        </div>
       </div>
 
       <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">

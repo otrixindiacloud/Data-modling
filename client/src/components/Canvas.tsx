@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useModelerStore } from "@/store/modelerStore";
+import { DataModel } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import DataObjectNode from "./nodes/DataObjectNode";
 import CanvasControls from "./CanvasControls";
@@ -59,10 +60,11 @@ function CanvasComponent() {
     setNodes: setStoreNodes,
     setEdges: setStoreEdges,
     selectNode, 
-    selectEdge, 
-    selectObject,
-    saveToHistory,
-    currentModel,
+  selectEdge, 
+  selectObject,
+  saveToHistory,
+  currentModel,
+  setCurrentModel,
     currentLayer,
     history,
     undo,
@@ -233,6 +235,17 @@ function CanvasComponent() {
   const { data: allModels } = useQuery({
     queryKey: ["/api/models"],
   });
+
+  useEffect(() => {
+    if (!currentModel && Array.isArray(allModels) && allModels.length > 0) {
+      const modelsList = allModels as DataModel[];
+      const conceptualModel = modelsList.find((model) =>
+        model.layer === "conceptual" && (model.parentModelId === null || model.parentModelId === undefined)
+      );
+
+      setCurrentModel(conceptualModel ?? modelsList[0]);
+    }
+  }, [allModels, currentModel, setCurrentModel]);
 
   // Load systems, domains, and areas for color updates
   const { data: systems } = useQuery({

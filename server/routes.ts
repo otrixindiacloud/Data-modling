@@ -97,8 +97,47 @@ import {
 } from "@shared/schema";
 import { getTargetSystemTemplate } from "./services/targetSystemTemplates";
 import multer from "multer";
+import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+const configurationUpdateSchema = z
+  .object({
+    value: z.any().optional(),
+    description: z.string().optional(),
+  })
+  .refine((data) => data.value !== undefined || data.description !== undefined, {
+    message: "At least one of value or description is required",
+  });
+
+async function upsertConfigurationEntry(input: unknown) {
+  const validatedData = insertConfigurationSchema.parse(input);
+  const existing = await storage.getConfigurationByCategoryAndKey(
+    validatedData.category,
+    validatedData.key
+  );
+
+  const fallbackDescription = `${validatedData.category}.${validatedData.key} configuration`;
+
+  if (existing) {
+    const updated = await storage.updateConfiguration(existing.id, {
+      value: validatedData.value,
+      description:
+        validatedData.description ?? existing.description ?? fallbackDescription,
+    });
+
+    return { configuration: updated, created: false as const };
+  }
+
+  const created = await storage.createConfiguration({
+    category: validatedData.category,
+    key: validatedData.key,
+    value: validatedData.value,
+    description: validatedData.description ?? fallbackDescription,
+  });
+
+  return { configuration: created, created: true as const };
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Data Models
@@ -230,6 +269,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
 
+          const basePosition = templateObj.position || { x: 0, y: 0 };
+          const templateMetadata = {
+            createdFromTemplate: true,
+            templateName: selectedTargetSystem,
+            templateObjectType: templateObj.type,
+          };
+
+          const layerConfigBase = {
+            position: basePosition,
+            template: selectedTargetSystem,
+          };
+
           // Create object in conceptual layer
           const conceptualObject = await storage.createDataObject({
             name: templateObj.name,
@@ -239,7 +290,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
             targetSystemId: targetSystemId,
             isNew: false,
-            position: templateObj.position
+            position: basePosition
+          });
+
+          await storage.createDataModelObject({
+            objectId: conceptualObject.id,
+            modelId: conceptualModel.id,
+            targetSystemId: targetSystemId,
+            position: basePosition,
+            metadata: templateMetadata,
+            isVisible: true,
+            layerSpecificConfig: {
+              ...layerConfigBase,
+              layer: "conceptual"
+            }
           });
 
           // Create object in logical layer
@@ -251,7 +315,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
             targetSystemId: targetSystemId,
             isNew: false,
-            position: templateObj.position
+            position: basePosition
+          });
+
+          await storage.createDataModelObject({
+            objectId: logicalObject.id,
+            modelId: logicalModel.id,
+            targetSystemId: targetSystemId,
+            position: basePosition,
+            metadata: templateMetadata,
+            isVisible: true,
+            layerSpecificConfig: {
+              ...layerConfigBase,
+              layer: "logical"
+            }
           });
 
           // Create object in physical layer
@@ -263,7 +340,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
             targetSystemId: targetSystemId,
             isNew: false,
-            position: templateObj.position
+            position: basePosition
+          });
+
+          await storage.createDataModelObject({
+            objectId: physicalObject.id,
+            modelId: physicalModel.id,
+            targetSystemId: targetSystemId,
+            position: basePosition,
+            metadata: templateMetadata,
+            isVisible: true,
+            layerSpecificConfig: {
+              ...layerConfigBase,
+              layer: "physical"
+            }
           });
 
           // Create attributes for logical and physical layers (conceptual layer doesn't show attributes)
@@ -1492,8 +1582,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/config/:category", async (req, res) => {
     try {
-      const category = req.params.category;
-      const configurations = await storage.getConfigurations();
+      const { category } = req.params;
+      const configurations = await storage.getConfigurationsByCategory(category);
       res.json(configurations);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch category configurations" });
@@ -1515,34 +1605,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/config", async (req, res) => {
     try {
-      const validatedData = insertConfigurationSchema.parse(req.body);
-      const configuration = await storage.createConfiguration(validatedData);
-      res.status(201).json(configuration);
+      const { configuration, created } = await upsertConfigurationEntry(req.body);
+      res.status(created ? 201 : 200).json(configuration);
     } catch (error) {
-      res.status(400).json({ message: "Invalid configuration data" });
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid configuration data", details: error.issues });
+      } else {
+        res.status(500).json({ message: "Failed to save configuration" });
+      }
     }
   });
 
   app.put("/api/config/:category/:key", async (req, res) => {
     try {
       const { category, key } = req.params;
-      const validatedData = insertConfigurationSchema.partial().parse(req.body);
-      const configuration = await storage.createConfiguration({
-        category,
-        key,
-        ...validatedData
+      const update = configurationUpdateSchema.parse(req.body);
+      const existing = await storage.getConfiguration(category, key);
+
+      if (!existing) {
+        return res.status(404).json({ message: "Configuration not found" });
+      }
+
+      const fallbackDescription = `${category}.${key} configuration`;
+      const updated = await storage.updateConfiguration(existing.id, {
+        value: update.value ?? existing.value,
+        description: update.description ?? existing.description ?? fallbackDescription,
       });
-      res.json(configuration);
+
+      res.json(updated);
     } catch (error) {
-      res.status(400).json({ message: "Failed to update configuration" });
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid configuration update", details: error.issues });
+      } else {
+        res.status(500).json({ message: "Failed to update configuration" });
+      }
     }
   });
 
   app.delete("/api/config/:category/:key", async (req, res) => {
     try {
       const { category, key } = req.params;
-      // Note: This endpoint needs to be updated to use configuration ID instead of key
-      res.status(501).json({ message: "Delete by key not implemented, use ID instead" });
+      const existing = await storage.getConfiguration(category, key);
+
+      if (!existing) {
+        return res.status(404).json({ message: "Configuration not found" });
+      }
+
+      await storage.deleteConfiguration(existing.id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Failed to delete configuration" });
@@ -1557,20 +1666,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Configurations must be an array" });
       }
 
-      const results = await Promise.all(
-        configurations.map(async config => {
-          try {
-            const validatedData = insertConfigurationSchema.parse(config);
-            return await storage.createConfiguration(validatedData);
-          } catch (error) {
-            throw new Error(`Invalid configuration: ${config.category}.${config.key}`);
-          }
-        })
-      );
+      const total = configurations.length;
+      let created = 0;
 
-      res.json({ success: true, updated: results.length });
-    } catch (error: any) {
-      res.status(400).json({ message: error.message || "Failed to update configurations" });
+      for (const config of configurations) {
+        const result = await upsertConfigurationEntry(config);
+        if (result.created) {
+          created += 1;
+        }
+      }
+
+      res.json({ success: true, created, updated: total - created });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid configuration data", details: error.issues });
+      } else {
+        res.status(500).json({ message: "Failed to update configurations" });
+      }
     }
   });
 
@@ -1651,43 +1763,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/configurations", async (req, res) => {
     try {
-      const { category, key, value, description } = req.body;
-      
-      // Check if configuration already exists
-      const existing = await storage.getConfigurationByCategoryAndKey(category, key);
-      
-      if (existing) {
-        // Update existing configuration
-        const updated = await storage.updateConfiguration(existing.id, {
-          value,
-          description: description || existing.description
-        });
-        res.json(updated);
-      } else {
-        // Create new configuration
-        const configuration = await storage.createConfiguration({
-          category,
-          key,
-          value,
-          description: description || `${category} configuration`
-        });
-        res.status(201).json(configuration);
-      }
+      const { configuration, created } = await upsertConfigurationEntry(req.body);
+      res.status(created ? 201 : 200).json(configuration);
     } catch (error) {
       console.error("Error saving configuration:", error);
-      res.status(500).json({ message: "Failed to save configuration" });
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid configuration data", details: error.issues });
+      } else {
+        res.status(500).json({ message: "Failed to save configuration" });
+      }
     }
   });
 
   app.put("/api/configurations/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { value, description } = req.body;
-      
-      const configuration = await storage.updateConfiguration(id, {
-        value,
-        description
-      });
+      const update = configurationUpdateSchema.parse(req.body);
+
+      const updateData: { value?: any; description?: string } = {};
+      if (update.value !== undefined) {
+        updateData.value = update.value;
+      }
+      if (update.description !== undefined) {
+        updateData.description = update.description;
+      }
+
+      const configuration = await storage.updateConfiguration(id, updateData);
       
       if (!configuration) {
         return res.status(404).json({ message: "Configuration not found" });
@@ -1696,7 +1797,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(configuration);
     } catch (error) {
       console.error("Error updating configuration:", error);
-      res.status(500).json({ message: "Failed to update configuration" });
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid configuration update", details: error.issues });
+      } else {
+        res.status(500).json({ message: "Failed to update configuration" });
+      }
     }
   });
 

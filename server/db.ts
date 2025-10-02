@@ -2,7 +2,10 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import Database from 'better-sqlite3';
 import { drizzle as drizzleSQLite } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import ws from "ws";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as schema from "@shared/schema";
 
 // Use PostgreSQL if DATABASE_URL is provided, otherwise use SQLite for local development
@@ -28,6 +31,15 @@ if (usePostgreSQL) {
   const sqlite = new Database('./dev.db');
   sqlite.pragma('foreign_keys = ON');
   db = drizzleSQLite(sqlite, { schema });
+
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const migrationsFolder = path.resolve(__dirname, "../migrations");
+    migrate(db, { migrationsFolder });
+  } catch (migrationError) {
+    console.error("Failed to run SQLite migrations:", migrationError);
+  }
 }
 
 export { db, pool };
