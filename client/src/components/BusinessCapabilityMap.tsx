@@ -7,6 +7,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ChevronDown,
   ChevronRight,
@@ -25,7 +29,11 @@ import {
   Info,
   Sparkles,
   TrendingUp,
-  Clock3
+  Clock3,
+  Save,
+  Plus,
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { ResponsiveContainer, Treemap, Tooltip as RechartsTooltip, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 import type { TooltipProps } from "recharts";
@@ -88,6 +96,30 @@ interface CapabilityMappings {
       colorCode: string;
     };
   }>;
+}
+
+interface DataDomainSummary {
+  id: number;
+  name: string;
+  description?: string;
+  colorCode: string;
+}
+
+interface DataAreaSummary {
+  id: number;
+  name: string;
+  description?: string;
+  colorCode: string;
+  domainId: number;
+}
+
+interface SystemSummary {
+  id: number;
+  name: string;
+  category: string;
+  type?: string;
+  colorCode: string;
+  description?: string;
 }
 
 type RoadmapHorizon = "now" | "next" | "later";
@@ -223,7 +255,7 @@ const CapabilityNode: React.FC<CapabilityNodeProps> = ({
   const icon = iconMap[capability.icon || 'building'] || iconMap.building;
 
   return (
-    <div className={`ml-${level * 4}`}>
+    <div className="space-y-1" style={{ marginLeft: level * 16 }}>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <div className="flex items-center space-x-2 group">
           {hasChildren && (
@@ -291,9 +323,17 @@ const CapabilityNode: React.FC<CapabilityNodeProps> = ({
 
 interface CapabilityMappingsDisplayProps {
   mappings: CapabilityMappings;
+  onRemoveDomainMapping?: (id: number) => void;
+  onRemoveDataAreaMapping?: (id: number) => void;
+  onRemoveSystemMapping?: (id: number) => void;
 }
 
-const CapabilityMappingsDisplay: React.FC<CapabilityMappingsDisplayProps> = ({ mappings }) => {
+const CapabilityMappingsDisplay: React.FC<CapabilityMappingsDisplayProps> = ({
+  mappings,
+  onRemoveDomainMapping,
+  onRemoveDataAreaMapping,
+  onRemoveSystemMapping,
+}) => {
   return (
     <div className="space-y-4">
       {/* Data Domains */}
@@ -305,17 +345,29 @@ const CapabilityMappingsDisplay: React.FC<CapabilityMappingsDisplayProps> = ({ m
         <div className="space-y-2">
           {mappings.domains.map((mapping) => (
             <Card key={mapping.id} className="p-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center space-x-2">
-                  <div 
-                    className="w-3 h-3 rounded-full" 
+                  <div
+                    className="w-3 h-3 rounded-full"
                     style={{ backgroundColor: mapping.domain.colorCode }}
                   />
                   <span className="font-medium">{mapping.domain.name}</span>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline">{mapping.mappingType}</Badge>
-                  <Badge variant="secondary">{mapping.importance}</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="outline">{mapping.mappingType}</Badge>
+                    <Badge variant="secondary">{mapping.importance}</Badge>
+                  </div>
+                  {onRemoveDomainMapping && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${mapping.domain.name} domain mapping`}
+                      onClick={() => onRemoveDomainMapping(mapping.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
               {mapping.domain.description && (
@@ -335,17 +387,29 @@ const CapabilityMappingsDisplay: React.FC<CapabilityMappingsDisplayProps> = ({ m
         <div className="space-y-2">
           {mappings.dataAreas.map((mapping) => (
             <Card key={mapping.id} className="p-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center space-x-2">
-                  <div 
-                    className="w-3 h-3 rounded-full" 
+                  <div
+                    className="w-3 h-3 rounded-full"
                     style={{ backgroundColor: mapping.dataArea.colorCode }}
                   />
                   <span className="font-medium">{mapping.dataArea.name}</span>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline">{mapping.mappingType}</Badge>
-                  <Badge variant="secondary">{mapping.importance}</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="outline">{mapping.mappingType}</Badge>
+                    <Badge variant="secondary">{mapping.importance}</Badge>
+                  </div>
+                  {onRemoveDataAreaMapping && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${mapping.dataArea.name} data area mapping`}
+                      onClick={() => onRemoveDataAreaMapping(mapping.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
               {mapping.dataArea.description && (
@@ -365,19 +429,31 @@ const CapabilityMappingsDisplay: React.FC<CapabilityMappingsDisplayProps> = ({ m
         <div className="space-y-2">
           {mappings.systems.map((mapping) => (
             <Card key={mapping.id} className="p-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <div 
-                    className="w-3 h-3 rounded-full" 
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    className="w-3 h-3 rounded-full"
                     style={{ backgroundColor: mapping.system.colorCode }}
                   />
                   <span className="font-medium">{mapping.system.name}</span>
                   <Badge variant="outline" className="text-xs">{mapping.system.category}</Badge>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Badge variant="outline">{mapping.mappingType}</Badge>
-                  <Badge variant="secondary">{mapping.systemRole}</Badge>
-                  <Badge variant="outline">{mapping.coverage}</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="outline">{mapping.mappingType}</Badge>
+                    <Badge variant="secondary">{mapping.systemRole}</Badge>
+                    <Badge variant="outline">{mapping.coverage}</Badge>
+                  </div>
+                  {onRemoveSystemMapping && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${mapping.system.name} system mapping`}
+                      onClick={() => onRemoveSystemMapping(mapping.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
               {mapping.system.description && (
@@ -401,10 +477,62 @@ export const BusinessCapabilityMap: React.FC = () => {
   });
   const [activeView, setActiveView] = useState<string>("infographic");
   const [loading, setLoading] = useState(true);
+  const [domains, setDomains] = useState<DataDomainSummary[]>([]);
+  const [dataAreas, setDataAreas] = useState<DataAreaSummary[]>([]);
+  const [systems, setSystems] = useState<SystemSummary[]>([]);
+  const [capabilityDetailTab, setCapabilityDetailTab] = useState<"insights" | "admin">("insights");
+  const [isSavingCapability, setIsSavingCapability] = useState(false);
+  const [isCreatingCapability, setIsCreatingCapability] = useState(false);
+  const [isDeletingCapability, setIsDeletingCapability] = useState(false);
+  const [isCreatingDomainMapping, setIsCreatingDomainMapping] = useState(false);
+  const [isCreatingAreaMapping, setIsCreatingAreaMapping] = useState(false);
+  const [isCreatingSystemMapping, setIsCreatingSystemMapping] = useState(false);
+  const [editCapabilityForm, setEditCapabilityForm] = useState({
+    name: "",
+    code: "",
+    description: "",
+    maturityLevel: "",
+    criticality: "medium",
+    colorCode: "#6366f1",
+    sortOrder: "",
+    level: "",
+  });
+  const [newCapabilityForm, setNewCapabilityForm] = useState({
+    name: "",
+    code: "",
+    description: "",
+    maturityLevel: "developing",
+    criticality: "medium",
+    colorCode: "#6366f1",
+    sortOrder: "",
+    parentId: "",
+    level: "",
+  });
+  const [domainMappingForm, setDomainMappingForm] = useState({
+    domainId: "",
+    mappingType: "primary",
+    importance: "medium",
+    description: "",
+  });
+  const [dataAreaMappingForm, setDataAreaMappingForm] = useState({
+    domainId: "",
+    dataAreaId: "",
+    mappingType: "primary",
+    importance: "medium",
+    description: "",
+  });
+  const [systemMappingForm, setSystemMappingForm] = useState({
+    systemId: "",
+    mappingType: "enables",
+    systemRole: "primary",
+    coverage: "full",
+    description: "",
+  });
   const { toast } = useToast();
 
   useEffect(() => {
-    loadCapabilityTree();
+    fetchCapabilityTree();
+    loadReferenceData();
   }, []);
 
   useEffect(() => {
@@ -413,28 +541,38 @@ export const BusinessCapabilityMap: React.FC = () => {
     }
   }, [selectedCapability]);
 
-  const loadCapabilityTree = async () => {
-    try {
-      const response = await fetch('/api/capabilities/tree');
-      if (!response.ok) throw new Error('Failed to load capability tree');
-      const tree = await response.json();
-      setCapabilityTree(tree);
-      
-      // Select first capability by default
-      if (tree.length > 0) {
-        setSelectedCapability(tree[0]);
-      }
-    } catch (error) {
-      console.error('Error loading capability tree:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load business capability map",
-        variant: "destructive",
+  useEffect(() => {
+    if (selectedCapability) {
+      setCapabilityDetailTab("insights");
+      setEditCapabilityForm({
+        name: selectedCapability.name ?? "",
+        code: selectedCapability.code ?? "",
+        description: selectedCapability.description ?? "",
+        maturityLevel: selectedCapability.maturityLevel ?? "",
+        criticality: selectedCapability.criticality ?? "medium",
+        colorCode: selectedCapability.colorCode ?? "#6366f1",
+        sortOrder: selectedCapability.sortOrder ? String(selectedCapability.sortOrder) : "",
+        level: selectedCapability.level ? String(selectedCapability.level) : "",
       });
-    } finally {
-      setLoading(false);
+
+      setNewCapabilityForm((prev) => ({
+        ...prev,
+        parentId: selectedCapability.id ? String(selectedCapability.id) : "",
+        level: selectedCapability.level ? String(selectedCapability.level + 1) : "",
+      }));
+    } else {
+      setEditCapabilityForm({
+        name: "",
+        code: "",
+        description: "",
+        maturityLevel: "",
+        criticality: "medium",
+        colorCode: "#6366f1",
+        sortOrder: "",
+        level: "",
+      });
     }
-  };
+  }, [selectedCapability]);
 
   const loadCapabilityMappings = async (capabilityId: number) => {
     try {
@@ -451,6 +589,581 @@ export const BusinessCapabilityMap: React.FC = () => {
       });
     }
   };
+
+  const loadReferenceData = async () => {
+    try {
+      const [domainsResponse, areasResponse, systemsResponse] = await Promise.all([
+        fetch("/api/domains"),
+        fetch("/api/areas"),
+        fetch("/api/systems"),
+      ]);
+
+      if (!domainsResponse.ok) throw new Error("Failed to load data domains");
+      if (!areasResponse.ok) throw new Error("Failed to load data areas");
+      if (!systemsResponse.ok) throw new Error("Failed to load systems");
+
+      const [domainsData, areasData, systemsData] = await Promise.all([
+        domainsResponse.json(),
+        areasResponse.json(),
+        systemsResponse.json(),
+      ]);
+
+      setDomains(domainsData);
+      setDataAreas(areasData);
+      setSystems(systemsData);
+    } catch (error) {
+      console.error("Error loading reference data:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load supporting reference data",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const setSelectedCapabilityById = (capabilityId?: number | null, tree?: BusinessCapability[]) => {
+    if (!capabilityId) {
+      if (tree && tree.length > 0) {
+        setSelectedCapability(tree[0]);
+      }
+      return;
+    }
+
+    const lookupTree = tree ?? capabilityTree;
+    const findCapability = (nodes: BusinessCapability[]): BusinessCapability | undefined => {
+      for (const node of nodes) {
+        if (node.id === capabilityId) {
+          return node;
+        }
+        if (node.children?.length) {
+          const found = findCapability(node.children);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    };
+
+    const found = findCapability(lookupTree);
+    if (found) {
+      setSelectedCapability(found);
+    } else if (lookupTree.length > 0) {
+      setSelectedCapability(lookupTree[0]);
+    }
+  };
+
+  const handleEditCapabilityInputChange = <K extends keyof typeof editCapabilityForm>(
+    field: K,
+    value: (typeof editCapabilityForm)[K],
+  ) => {
+    setEditCapabilityForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleNewCapabilityInputChange = <K extends keyof typeof newCapabilityForm>(
+    field: K,
+    value: (typeof newCapabilityForm)[K],
+  ) => {
+    setNewCapabilityForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleDomainMappingInputChange = <K extends keyof typeof domainMappingForm>(
+    field: K,
+    value: (typeof domainMappingForm)[K],
+  ) => {
+    setDomainMappingForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleDataAreaMappingInputChange = <K extends keyof typeof dataAreaMappingForm>(
+    field: K,
+    value: (typeof dataAreaMappingForm)[K],
+  ) => {
+    setDataAreaMappingForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSystemMappingInputChange = <K extends keyof typeof systemMappingForm>(
+    field: K,
+    value: (typeof systemMappingForm)[K],
+  ) => {
+    setSystemMappingForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const fetchCapabilityTree = async (selectCapabilityId?: number) => {
+    try {
+      const response = await fetch('/api/capabilities/tree');
+      if (!response.ok) throw new Error('Failed to load capability tree');
+      const tree = await response.json();
+      setCapabilityTree(tree);
+
+      const preferredId = selectCapabilityId ?? selectedCapability?.id;
+      if (preferredId) {
+        setSelectedCapabilityById(preferredId, tree);
+      } else if (!selectedCapability && tree.length > 0) {
+        setSelectedCapability(tree[0]);
+      }
+    } catch (error) {
+      console.error('Error loading capability tree:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load business capability map",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveCapability = async () => {
+    if (!selectedCapability) return;
+
+    if (!editCapabilityForm.name.trim() || !editCapabilityForm.code.trim()) {
+      toast({
+        title: "Missing information",
+        description: "Name and code are required to update a capability.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSavingCapability(true);
+    try {
+      const payload = {
+        name: editCapabilityForm.name.trim(),
+        code: editCapabilityForm.code.trim(),
+        description: editCapabilityForm.description.trim() || null,
+        maturityLevel: editCapabilityForm.maturityLevel || null,
+        criticality: editCapabilityForm.criticality,
+        colorCode: editCapabilityForm.colorCode,
+        sortOrder: editCapabilityForm.sortOrder ? Number(editCapabilityForm.sortOrder) : null,
+        level: editCapabilityForm.level ? Number(editCapabilityForm.level) : selectedCapability.level,
+      };
+
+      const response = await fetch(`/api/capabilities/${selectedCapability.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to update capability");
+      }
+
+      const updated = await response.json();
+      toast({
+        title: "Capability updated",
+        description: `${updated.name} has been saved successfully.`,
+      });
+
+  await fetchCapabilityTree(updated.id);
+      await loadCapabilityMappings(updated.id);
+    } catch (error) {
+      console.error("Error updating capability:", error);
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Failed to save capability changes",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingCapability(false);
+    }
+  };
+
+  const handleCreateCapability = async () => {
+    if (!newCapabilityForm.name.trim() || !newCapabilityForm.code.trim()) {
+      toast({
+        title: "Missing information",
+        description: "Name and code are required to create a capability.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingCapability(true);
+    try {
+      const parentId = newCapabilityForm.parentId ? Number(newCapabilityForm.parentId) : null;
+      const parentCapability = parentId ? capabilityMap.get(parentId) : undefined;
+      const resolvedLevel = newCapabilityForm.level
+        ? Number(newCapabilityForm.level)
+        : parentCapability?.level
+          ? parentCapability.level + 1
+          : 1;
+
+      const payload = {
+        name: newCapabilityForm.name.trim(),
+        code: newCapabilityForm.code.trim(),
+        description: newCapabilityForm.description.trim() || null,
+        maturityLevel: newCapabilityForm.maturityLevel || null,
+        criticality: newCapabilityForm.criticality,
+        colorCode: newCapabilityForm.colorCode,
+        sortOrder: newCapabilityForm.sortOrder ? Number(newCapabilityForm.sortOrder) : null,
+        parentId,
+        level: resolvedLevel,
+        isStandard: true,
+      };
+
+      const response = await fetch("/api/capabilities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create capability");
+      }
+
+      const created = await response.json();
+      toast({
+        title: "Capability created",
+        description: `${created.name} has been added.`,
+      });
+
+      setNewCapabilityForm((prev) => ({
+        ...prev,
+        name: "",
+        code: "",
+        description: "",
+        sortOrder: "",
+      }));
+
+  await fetchCapabilityTree(created.id);
+    } catch (error) {
+      console.error("Error creating capability:", error);
+      toast({
+        title: "Creation failed",
+        description: error instanceof Error ? error.message : "Failed to create capability",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingCapability(false);
+    }
+  };
+
+  const handleDeleteCapability = async () => {
+    if (!selectedCapability) return;
+
+    setIsDeletingCapability(true);
+    try {
+      const response = await fetch(`/api/capabilities/${selectedCapability.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to delete capability");
+      }
+
+      toast({
+        title: "Capability deleted",
+        description: `${selectedCapability.name} has been removed.`,
+      });
+
+      const parentId = selectedCapability.parentId;
+      setSelectedCapability(undefined);
+  await fetchCapabilityTree(parentId ?? undefined);
+    } catch (error) {
+      console.error("Error deleting capability:", error);
+      toast({
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "Failed to delete capability",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingCapability(false);
+    }
+  };
+
+  const handleAddDomainMapping = async () => {
+    if (!selectedCapability) return;
+    if (!domainMappingForm.domainId) {
+      toast({
+        title: "Select a domain",
+        description: "Choose a data domain before adding the mapping.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingDomainMapping(true);
+    try {
+      const response = await fetch(`/api/capabilities/${selectedCapability.id}/domains/${domainMappingForm.domainId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mappingType: domainMappingForm.mappingType,
+          importance: domainMappingForm.importance,
+          description: domainMappingForm.description.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to add domain mapping");
+      }
+
+      toast({
+        title: "Domain linked",
+        description: "The domain has been associated with this capability.",
+      });
+
+      setDomainMappingForm({
+        domainId: "",
+        mappingType: "primary",
+        importance: "medium",
+        description: "",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error creating domain mapping:", error);
+      toast({
+        title: "Mapping failed",
+        description: error instanceof Error ? error.message : "Failed to add domain mapping",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingDomainMapping(false);
+    }
+  };
+
+  const handleAddDataAreaMapping = async () => {
+    if (!selectedCapability) return;
+    if (!dataAreaMappingForm.dataAreaId) {
+      toast({
+        title: "Select a data area",
+        description: "Choose a data area before adding the mapping.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingAreaMapping(true);
+    try {
+      const response = await fetch(`/api/capabilities/${selectedCapability.id}/data-areas/${dataAreaMappingForm.dataAreaId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mappingType: dataAreaMappingForm.mappingType,
+          importance: dataAreaMappingForm.importance,
+          description: dataAreaMappingForm.description.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to add data area mapping");
+      }
+
+      toast({
+        title: "Data area linked",
+        description: "The data area has been associated with this capability.",
+      });
+
+      setDataAreaMappingForm({
+        domainId: "",
+        dataAreaId: "",
+        mappingType: "primary",
+        importance: "medium",
+        description: "",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error creating data area mapping:", error);
+      toast({
+        title: "Mapping failed",
+        description: error instanceof Error ? error.message : "Failed to add data area mapping",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingAreaMapping(false);
+    }
+  };
+
+  const handleAddSystemMapping = async () => {
+    if (!selectedCapability) return;
+    if (!systemMappingForm.systemId) {
+      toast({
+        title: "Select a system",
+        description: "Choose a system before adding the mapping.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingSystemMapping(true);
+    try {
+      const response = await fetch(`/api/capabilities/${selectedCapability.id}/systems/${systemMappingForm.systemId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mappingType: systemMappingForm.mappingType,
+          systemRole: systemMappingForm.systemRole,
+          coverage: systemMappingForm.coverage,
+          description: systemMappingForm.description.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to add system mapping");
+      }
+
+      toast({
+        title: "System linked",
+        description: "The system has been associated with this capability.",
+      });
+
+      setSystemMappingForm({
+        systemId: "",
+        mappingType: "enables",
+        systemRole: "primary",
+        coverage: "full",
+        description: "",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error creating system mapping:", error);
+      toast({
+        title: "Mapping failed",
+        description: error instanceof Error ? error.message : "Failed to add system mapping",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingSystemMapping(false);
+    }
+  };
+
+  const handleRemoveDomainMapping = async (mappingId: number) => {
+    if (!selectedCapability) return;
+
+    try {
+      const response = await fetch(`/api/capability-domain-mappings/${mappingId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to remove domain mapping");
+      }
+
+      toast({
+        title: "Mapping removed",
+        description: "The domain has been detached from the capability.",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error removing domain mapping:", error);
+      toast({
+        title: "Removal failed",
+        description: error instanceof Error ? error.message : "Failed to remove domain mapping",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemoveDataAreaMapping = async (mappingId: number) => {
+    if (!selectedCapability) return;
+
+    try {
+      const response = await fetch(`/api/capability-data-area-mappings/${mappingId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to remove data area mapping");
+      }
+
+      toast({
+        title: "Mapping removed",
+        description: "The data area has been detached from the capability.",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error removing data area mapping:", error);
+      toast({
+        title: "Removal failed",
+        description: error instanceof Error ? error.message : "Failed to remove data area mapping",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRemoveSystemMapping = async (mappingId: number) => {
+    if (!selectedCapability) return;
+
+    try {
+      const response = await fetch(`/api/capability-system-mappings/${mappingId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to remove system mapping");
+      }
+
+      toast({
+        title: "Mapping removed",
+        description: "The system has been detached from the capability.",
+      });
+
+      await loadCapabilityMappings(selectedCapability.id);
+    } catch (error) {
+      console.error("Error removing system mapping:", error);
+      toast({
+        title: "Removal failed",
+        description: error instanceof Error ? error.message : "Failed to remove system mapping",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const sortedDomains = useMemo(() => {
+    return [...domains].sort((a, b) => a.name.localeCompare(b.name));
+  }, [domains]);
+
+  const sortedDataAreas = useMemo(() => {
+    return [...dataAreas].sort((a, b) => a.name.localeCompare(b.name));
+  }, [dataAreas]);
+
+  const sortedSystems = useMemo(() => {
+    return [...systems].sort((a, b) => a.name.localeCompare(b.name));
+  }, [systems]);
+
+  const availableDataAreas = useMemo(() => {
+    if (!dataAreaMappingForm.domainId) {
+      return sortedDataAreas;
+    }
+    return sortedDataAreas.filter((area) => String(area.domainId) === dataAreaMappingForm.domainId);
+  }, [sortedDataAreas, dataAreaMappingForm.domainId]);
 
   const capabilityMap = useMemo(() => {
     const map = new Map<number, BusinessCapability>();
@@ -535,6 +1248,9 @@ export const BusinessCapabilityMap: React.FC = () => {
     };
   }, [capabilityMetrics]);
 
+  const domainColumns = useMemo(() => capabilityTree.flatMap((root) => root.children ?? []), [capabilityTree]);
+  const capabilityDomainCount = useMemo(() => domainColumns.length, [domainColumns]);
+
   const treemapData = useMemo(() => {
     const buildNodes = (nodes: BusinessCapability[]): CapabilityTreemapNode[] =>
       nodes.map((node) => {
@@ -609,13 +1325,13 @@ export const BusinessCapabilityMap: React.FC = () => {
   }, [capabilityMetrics]);
 
   const infographicColumns = useMemo(() => {
-    return capabilityTree.map((root, index) => {
-      const baseColor = root.colorCode || fallbackInfographicColors[index % fallbackInfographicColors.length];
+    return domainColumns.map((domain, index) => {
+      const baseColor = domain.colorCode || fallbackInfographicColors[index % fallbackInfographicColors.length];
       const headerColor = colord(baseColor).saturate(0.1).darken(0.08).toHex();
       const chipColor = colord(baseColor).lighten(0.25).desaturate(0.2).alpha(0.2).toRgbString();
       const softBackground = colord(baseColor).lighten(0.6).desaturate(0.35).alpha(0.18).toRgbString();
 
-      const sections: InfographicColumnSection[] = (root.children ?? []).map((child, childIndex) => {
+      const sections: InfographicColumnSection[] = (domain.children ?? []).map((child, childIndex) => {
         const lightenAmount = Math.min(0.65, 0.38 + childIndex * 0.08);
         const background = colord(baseColor).lighten(lightenAmount).desaturate(0.15).toHex();
         const borderColor = colord(baseColor)
@@ -637,7 +1353,7 @@ export const BusinessCapabilityMap: React.FC = () => {
       });
 
       return {
-        root,
+        root: domain,
         baseColor,
         headerColor,
         chipColor,
@@ -645,7 +1361,7 @@ export const BusinessCapabilityMap: React.FC = () => {
         sections,
       } satisfies InfographicColumnData;
     });
-  }, [capabilityTree]);
+  }, [domainColumns]);
 
   const selectedMetrics = selectedCapability
     ? metricsById.get(selectedCapability.id)
@@ -832,7 +1548,7 @@ export const BusinessCapabilityMap: React.FC = () => {
                           Explore the full capability landscape in an infographic view inspired by LeanIX best practices.
                         </p>
                         <Badge variant="outline" className="w-fit">
-                          {capabilityTree.length} capability domains
+                          {capabilityDomainCount} capability domains
                         </Badge>
                       </div>
                       <div className="overflow-x-auto pb-3">
@@ -969,57 +1685,650 @@ export const BusinessCapabilityMap: React.FC = () => {
               </CardHeader>
               <CardContent>
                 {selectedCapability ? (
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2 mb-2">
-                        <Badge variant="outline" className={getCriticalityColor(selectedCapability.criticality)}>
-                          {selectedCapability.criticality} criticality
-                        </Badge>
-                        {selectedCapability.maturityLevel && (
-                          <Badge variant="outline" className={getMaturityColor(selectedCapability.maturityLevel)}>
-                            {selectedCapability.maturityLevel}
-                          </Badge>
-                        )}
+                  <Tabs
+                    value={capabilityDetailTab}
+                    onValueChange={(value) => setCapabilityDetailTab(value as "insights" | "admin")}
+                    className="space-y-4"
+                  >
+                    <TabsList className="w-full justify-start">
+                      <TabsTrigger value="insights">Insights</TabsTrigger>
+                      <TabsTrigger value="admin">Administration</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="insights">
+                      <div className="space-y-4">
+                        <div>
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className={getCriticalityColor(selectedCapability.criticality)}>
+                              {selectedCapability.criticality} criticality
+                            </Badge>
+                            {selectedCapability.maturityLevel && (
+                              <Badge variant="outline" className={getMaturityColor(selectedCapability.maturityLevel)}>
+                                {selectedCapability.maturityLevel}
+                              </Badge>
+                            )}
+                            {selectedMetrics && (
+                              <Badge variant="secondary">Priority {selectedMetrics.priorityScore.toFixed(1)}</Badge>
+                            )}
+                          </div>
+                          {selectedCapability.description && (
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                              {selectedCapability.description}
+                            </p>
+                          )}
+                        </div>
+
                         {selectedMetrics && (
-                          <Badge variant="secondary">Priority {selectedMetrics.priorityScore.toFixed(1)}</Badge>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <DetailMetric
+                              label="Readiness"
+                              value={`${selectedMetrics.readinessPercent}%`}
+                              helper="Alignment with target state"
+                            />
+                            <DetailMetric
+                              label="Maturity"
+                              value={`${selectedMetrics.maturityScore.toFixed(1)} / 5`}
+                              helper="Capability maturity assessment"
+                            />
+                            <DetailMetric
+                              label="Horizon"
+                              value={roadmapLabels[selectedMetrics.horizon]}
+                              helper="Recommended investment timing"
+                            />
+                          </div>
                         )}
+
+                        <Separator />
+
+                        <div>
+                          <h4 className="mb-2 text-sm font-semibold">Data &amp; System Impact</h4>
+                          <ScrollArea className="h-[260px] pr-2">
+                            <CapabilityMappingsDisplay mappings={capabilityMappings} />
+                          </ScrollArea>
+                        </div>
                       </div>
-                      {selectedCapability.description && (
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {selectedCapability.description}
-                        </p>
-                      )}
-                    </div>
+                    </TabsContent>
 
-                    {selectedMetrics && (
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <DetailMetric
-                          label="Readiness"
-                          value={`${selectedMetrics.readinessPercent}%`}
-                          helper="Alignment with target state"
-                        />
-                        <DetailMetric
-                          label="Maturity"
-                          value={`${selectedMetrics.maturityScore.toFixed(1)} / 5`}
-                          helper="Capability maturity assessment"
-                        />
-                        <DetailMetric
-                          label="Horizon"
-                          value={roadmapLabels[selectedMetrics.horizon]}
-                          helper="Recommended investment timing"
-                        />
+                    <TabsContent value="admin">
+                      <div className="space-y-6">
+                        <div className="space-y-4 rounded-lg border p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="text-sm font-semibold">Capability details</h4>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={handleSaveCapability}
+                                disabled={isSavingCapability}
+                              >
+                                {isSavingCapability ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Save className="mr-2 h-4 w-4" />
+                                )}
+                                Save changes
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={handleDeleteCapability}
+                                disabled={isDeletingCapability}
+                              >
+                                {isDeletingCapability ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                )}
+                                Delete
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-name">Name</Label>
+                              <Input
+                                id="capability-name"
+                                value={editCapabilityForm.name}
+                                onChange={(event) => handleEditCapabilityInputChange("name", event.target.value)}
+                                placeholder="Capability name"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-code">Code</Label>
+                              <Input
+                                id="capability-code"
+                                value={editCapabilityForm.code}
+                                onChange={(event) => handleEditCapabilityInputChange("code", event.target.value)}
+                                placeholder="e.g. PROD-001"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-level">Level</Label>
+                              <Input
+                                id="capability-level"
+                                type="number"
+                                value={editCapabilityForm.level}
+                                onChange={(event) => handleEditCapabilityInputChange("level", event.target.value)}
+                                min={1}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-sort-order">Sort order</Label>
+                              <Input
+                                id="capability-sort-order"
+                                type="number"
+                                value={editCapabilityForm.sortOrder}
+                                onChange={(event) => handleEditCapabilityInputChange("sortOrder", event.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-maturity">Maturity</Label>
+                              <Select
+                                value={editCapabilityForm.maturityLevel || "unset"}
+                                onValueChange={(value) =>
+                                  handleEditCapabilityInputChange("maturityLevel", value === "unset" ? "" : value)
+                                }
+                              >
+                                <SelectTrigger id="capability-maturity">
+                                  <SelectValue placeholder="Select maturity" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="unset">Not set</SelectItem>
+                                  <SelectItem value="basic">Basic</SelectItem>
+                                  <SelectItem value="developing">Developing</SelectItem>
+                                  <SelectItem value="defined">Defined</SelectItem>
+                                  <SelectItem value="managed">Managed</SelectItem>
+                                  <SelectItem value="optimizing">Optimizing</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-criticality">Criticality</Label>
+                              <Select
+                                value={editCapabilityForm.criticality}
+                                onValueChange={(value) => handleEditCapabilityInputChange("criticality", value)}
+                              >
+                                <SelectTrigger id="capability-criticality">
+                                  <SelectValue placeholder="Select criticality" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="low">Low</SelectItem>
+                                  <SelectItem value="medium">Medium</SelectItem>
+                                  <SelectItem value="high">High</SelectItem>
+                                  <SelectItem value="critical">Critical</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="capability-color">Color</Label>
+                              <Input
+                                id="capability-color"
+                                type="color"
+                                value={editCapabilityForm.colorCode}
+                                onChange={(event) => handleEditCapabilityInputChange("colorCode", event.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label htmlFor="capability-description">Description</Label>
+                            <Textarea
+                              id="capability-description"
+                              rows={4}
+                              value={editCapabilityForm.description}
+                              onChange={(event) => handleEditCapabilityInputChange("description", event.target.value)}
+                              placeholder="Business context and expected outcomes"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 rounded-lg border p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="text-sm font-semibold">Create child capability</h4>
+                            <Button
+                              size="sm"
+                              onClick={handleCreateCapability}
+                              disabled={isCreatingCapability}
+                            >
+                              {isCreatingCapability ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Plus className="mr-2 h-4 w-4" />
+                              )}
+                              Add capability
+                            </Button>
+                          </div>
+
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1">
+                              <Label htmlFor="new-parent">Parent capability</Label>
+                              <Select
+                                value={newCapabilityForm.parentId || "none"}
+                                onValueChange={(value) =>
+                                  setNewCapabilityForm((prev) => ({
+                                    ...prev,
+                                    parentId: value === "none" ? "" : value,
+                                    level:
+                                      value === "none"
+                                        ? "1"
+                                        : (() => {
+                                            const parentCapability = capabilityMap.get(Number(value));
+                                            return parentCapability ? String(parentCapability.level + 1) : prev.level;
+                                          })(),
+                                  }))
+                                }
+                              >
+                                <SelectTrigger id="new-parent">
+                                  <SelectValue placeholder="Select parent" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-64">
+                                  <SelectItem value="none">No parent (root capability)</SelectItem>
+                                  {capabilityMetrics.map((metric) => (
+                                    <SelectItem key={metric.id} value={String(metric.capability.id)}>
+                                      {`Level ${metric.level}: ${metric.capability.name}`}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-level">Level</Label>
+                              <Input
+                                id="new-level"
+                                type="number"
+                                value={newCapabilityForm.level}
+                                onChange={(event) => handleNewCapabilityInputChange("level", event.target.value)}
+                                min={1}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-name">Name</Label>
+                              <Input
+                                id="new-name"
+                                value={newCapabilityForm.name}
+                                onChange={(event) => handleNewCapabilityInputChange("name", event.target.value)}
+                                placeholder="New capability name"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-code">Code</Label>
+                              <Input
+                                id="new-code"
+                                value={newCapabilityForm.code}
+                                onChange={(event) => handleNewCapabilityInputChange("code", event.target.value)}
+                                placeholder="Unique code"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-sort-order">Sort order</Label>
+                              <Input
+                                id="new-sort-order"
+                                type="number"
+                                value={newCapabilityForm.sortOrder}
+                                onChange={(event) => handleNewCapabilityInputChange("sortOrder", event.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-criticality">Criticality</Label>
+                              <Select
+                                value={newCapabilityForm.criticality}
+                                onValueChange={(value) => handleNewCapabilityInputChange("criticality", value)}
+                              >
+                                <SelectTrigger id="new-criticality">
+                                  <SelectValue placeholder="Select criticality" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="low">Low</SelectItem>
+                                  <SelectItem value="medium">Medium</SelectItem>
+                                  <SelectItem value="high">High</SelectItem>
+                                  <SelectItem value="critical">Critical</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-maturity">Maturity</Label>
+                              <Select
+                                value={newCapabilityForm.maturityLevel || "developing"}
+                                onValueChange={(value) => handleNewCapabilityInputChange("maturityLevel", value)}
+                              >
+                                <SelectTrigger id="new-maturity">
+                                  <SelectValue placeholder="Select maturity" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="basic">Basic</SelectItem>
+                                  <SelectItem value="developing">Developing</SelectItem>
+                                  <SelectItem value="defined">Defined</SelectItem>
+                                  <SelectItem value="managed">Managed</SelectItem>
+                                  <SelectItem value="optimizing">Optimizing</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="new-color">Color</Label>
+                              <Input
+                                id="new-color"
+                                type="color"
+                                value={newCapabilityForm.colorCode}
+                                onChange={(event) => handleNewCapabilityInputChange("colorCode", event.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor="new-description">Description</Label>
+                            <Textarea
+                              id="new-description"
+                              rows={3}
+                              value={newCapabilityForm.description}
+                              onChange={(event) => handleNewCapabilityInputChange("description", event.target.value)}
+                              placeholder="What value does this capability deliver?"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-6 rounded-lg border p-4">
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-sm font-semibold">Link data domain</h4>
+                              <Button
+                                size="sm"
+                                onClick={handleAddDomainMapping}
+                                disabled={isCreatingDomainMapping}
+                              >
+                                {isCreatingDomainMapping ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="mr-2 h-4 w-4" />
+                                )}
+                                Add domain
+                              </Button>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="domain-select">Domain</Label>
+                                <Select
+                                  value={domainMappingForm.domainId}
+                                  onValueChange={(value) => handleDomainMappingInputChange("domainId", value)}
+                                >
+                                  <SelectTrigger id="domain-select">
+                                    <SelectValue placeholder="Select domain" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-64">
+                                    {sortedDomains.map((domain) => (
+                                      <SelectItem key={domain.id} value={String(domain.id)}>
+                                        {domain.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="domain-mapping-type">Relationship</Label>
+                                <Select
+                                  value={domainMappingForm.mappingType}
+                                  onValueChange={(value) => handleDomainMappingInputChange("mappingType", value)}
+                                >
+                                  <SelectTrigger id="domain-mapping-type">
+                                    <SelectValue placeholder="Select relationship" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="primary">Primary</SelectItem>
+                                    <SelectItem value="secondary">Secondary</SelectItem>
+                                    <SelectItem value="supporting">Supporting</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="domain-importance">Importance</Label>
+                                <Select
+                                  value={domainMappingForm.importance}
+                                  onValueChange={(value) => handleDomainMappingInputChange("importance", value)}
+                                >
+                                  <SelectTrigger id="domain-importance">
+                                    <SelectValue placeholder="Select importance" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="low">Low</SelectItem>
+                                    <SelectItem value="medium">Medium</SelectItem>
+                                    <SelectItem value="high">High</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="domain-description">Context</Label>
+                              <Textarea
+                                id="domain-description"
+                                rows={3}
+                                value={domainMappingForm.description}
+                                onChange={(event) => handleDomainMappingInputChange("description", event.target.value)}
+                                placeholder="What role does this domain play?"
+                              />
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-sm font-semibold">Link data area</h4>
+                              <Button
+                                size="sm"
+                                onClick={handleAddDataAreaMapping}
+                                disabled={isCreatingAreaMapping}
+                              >
+                                {isCreatingAreaMapping ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="mr-2 h-4 w-4" />
+                                )}
+                                Add data area
+                              </Button>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="area-domain">Domain (optional)</Label>
+                                <Select
+                                  value={dataAreaMappingForm.domainId || "none"}
+                                  onValueChange={(value) =>
+                                    setDataAreaMappingForm((prev) => ({
+                                      ...prev,
+                                      domainId: value === "none" ? "" : value,
+                                      dataAreaId: "",
+                                    }))
+                                  }
+                                >
+                                  <SelectTrigger id="area-domain">
+                                    <SelectValue placeholder="Filter by domain" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-64">
+                                    <SelectItem value="none">All domains</SelectItem>
+                                    {sortedDomains.map((domain) => (
+                                      <SelectItem key={domain.id} value={String(domain.id)}>
+                                        {domain.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="area-select">Data area</Label>
+                                <Select
+                                  value={dataAreaMappingForm.dataAreaId}
+                                  onValueChange={(value) => handleDataAreaMappingInputChange("dataAreaId", value)}
+                                >
+                                  <SelectTrigger id="area-select">
+                                    <SelectValue placeholder="Select data area" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-64">
+                                    {availableDataAreas.map((area) => (
+                                      <SelectItem key={area.id} value={String(area.id)}>
+                                        {area.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="area-mapping-type">Relationship</Label>
+                                <Select
+                                  value={dataAreaMappingForm.mappingType}
+                                  onValueChange={(value) => handleDataAreaMappingInputChange("mappingType", value)}
+                                >
+                                  <SelectTrigger id="area-mapping-type">
+                                    <SelectValue placeholder="Select relationship" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="primary">Primary</SelectItem>
+                                    <SelectItem value="secondary">Secondary</SelectItem>
+                                    <SelectItem value="supporting">Supporting</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="area-importance">Importance</Label>
+                                <Select
+                                  value={dataAreaMappingForm.importance}
+                                  onValueChange={(value) => handleDataAreaMappingInputChange("importance", value)}
+                                >
+                                  <SelectTrigger id="area-importance">
+                                    <SelectValue placeholder="Select importance" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="low">Low</SelectItem>
+                                    <SelectItem value="medium">Medium</SelectItem>
+                                    <SelectItem value="high">High</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="area-description">Context</Label>
+                              <Textarea
+                                id="area-description"
+                                rows={3}
+                                value={dataAreaMappingForm.description}
+                                onChange={(event) => handleDataAreaMappingInputChange("description", event.target.value)}
+                                placeholder="How does this data area support the capability?"
+                              />
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="text-sm font-semibold">Link system</h4>
+                              <Button
+                                size="sm"
+                                onClick={handleAddSystemMapping}
+                                disabled={isCreatingSystemMapping}
+                              >
+                                {isCreatingSystemMapping ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="mr-2 h-4 w-4" />
+                                )}
+                                Add system
+                              </Button>
+                            </div>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="system-select">System</Label>
+                                <Select
+                                  value={systemMappingForm.systemId}
+                                  onValueChange={(value) => handleSystemMappingInputChange("systemId", value)}
+                                >
+                                  <SelectTrigger id="system-select">
+                                    <SelectValue placeholder="Select system" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-64">
+                                    {sortedSystems.map((system) => (
+                                      <SelectItem key={system.id} value={String(system.id)}>
+                                        {system.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="system-mapping-type">Relationship</Label>
+                                <Select
+                                  value={systemMappingForm.mappingType}
+                                  onValueChange={(value) => handleSystemMappingInputChange("mappingType", value)}
+                                >
+                                  <SelectTrigger id="system-mapping-type">
+                                    <SelectValue placeholder="Select relationship" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="enables">Enables</SelectItem>
+                                    <SelectItem value="supports">Supports</SelectItem>
+                                    <SelectItem value="automates">Automates</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="system-role">System role</Label>
+                                <Select
+                                  value={systemMappingForm.systemRole}
+                                  onValueChange={(value) => handleSystemMappingInputChange("systemRole", value)}
+                                >
+                                  <SelectTrigger id="system-role">
+                                    <SelectValue placeholder="Select role" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="primary">Primary</SelectItem>
+                                    <SelectItem value="secondary">Secondary</SelectItem>
+                                    <SelectItem value="supporting">Supporting</SelectItem>
+                                    <SelectItem value="legacy">Legacy</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="system-coverage">Coverage</Label>
+                                <Select
+                                  value={systemMappingForm.coverage}
+                                  onValueChange={(value) => handleSystemMappingInputChange("coverage", value)}
+                                >
+                                  <SelectTrigger id="system-coverage">
+                                    <SelectValue placeholder="Select coverage" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="full">Full</SelectItem>
+                                    <SelectItem value="partial">Partial</SelectItem>
+                                    <SelectItem value="minimal">Minimal</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="system-description">Context</Label>
+                              <Textarea
+                                id="system-description"
+                                rows={3}
+                                value={systemMappingForm.description}
+                                onChange={(event) => handleSystemMappingInputChange("description", event.target.value)}
+                                placeholder="Describe the system's role for this capability"
+                              />
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-semibold">Current relationships</h4>
+                            <ScrollArea className="h-[260px] pr-2">
+                              <CapabilityMappingsDisplay
+                                mappings={capabilityMappings}
+                                onRemoveDomainMapping={handleRemoveDomainMapping}
+                                onRemoveDataAreaMapping={handleRemoveDataAreaMapping}
+                                onRemoveSystemMapping={handleRemoveSystemMapping}
+                              />
+                            </ScrollArea>
+                          </div>
+                        </div>
                       </div>
-                    )}
-
-                    <Separator />
-
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2">Data & System Impact</h4>
-                      <ScrollArea className="h-[260px] pr-2">
-                        <CapabilityMappingsDisplay mappings={capabilityMappings} />
-                      </ScrollArea>
-                    </div>
-                  </div>
+                    </TabsContent>
+                  </Tabs>
                 ) : (
                   <p className="text-muted-foreground">
                     Select a capability from the hierarchy or visualization to explore supporting data domains, areas, and enabling systems.

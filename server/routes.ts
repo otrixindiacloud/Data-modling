@@ -2454,6 +2454,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/capability-domain-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteCapabilityDomainMapping(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete capability-domain mapping:", error);
+      res.status(500).json({ message: "Failed to delete mapping" });
+    }
+  });
+
   // Capability-DataArea Mappings
   app.post("/api/capabilities/:capabilityId/data-areas/:dataAreaId", async (req, res) => {
     try {
@@ -2471,6 +2482,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/capability-data-area-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteCapabilityDataAreaMapping(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete capability-data area mapping:", error);
+      res.status(500).json({ message: "Failed to delete mapping" });
+    }
+  });
+
   // Capability-System Mappings
   app.post("/api/capabilities/:capabilityId/systems/:systemId", async (req, res) => {
     try {
@@ -2485,6 +2507,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Failed to create capability-system mapping:", error);
       res.status(500).json({ message: "Failed to create mapping" });
+    }
+  });
+
+  app.delete("/api/capability-system-mappings/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteCapabilitySystemMapping(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete capability-system mapping:", error);
+      res.status(500).json({ message: "Failed to delete mapping" });
     }
   });
 

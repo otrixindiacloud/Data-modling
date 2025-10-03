@@ -147,6 +147,9 @@ export interface IStorage {
   createCapabilityDomainMapping(mapping: InsertCapabilityDataDomainMapping): Promise<CapabilityDataDomainMapping>;
   createCapabilityDataAreaMapping(mapping: InsertCapabilityDataAreaMapping): Promise<CapabilityDataAreaMapping>;
   createCapabilitySystemMapping(mapping: InsertCapabilitySystemMapping): Promise<CapabilitySystemMapping>;
+  deleteCapabilityDomainMapping(id: number): Promise<void>;
+  deleteCapabilityDataAreaMapping(id: number): Promise<void>;
+  deleteCapabilitySystemMapping(id: number): Promise<void>;
 }
 
 export class Storage implements IStorage {
@@ -588,6 +591,18 @@ export class Storage implements IStorage {
   async createCapabilitySystemMapping(mapping: InsertCapabilitySystemMapping): Promise<CapabilitySystemMapping> {
     const result = await db.insert(capabilitySystemMappings).values(mapping).returning();
     return result[0];
+  }
+
+  async deleteCapabilityDomainMapping(id: number): Promise<void> {
+    await db.delete(capabilityDataDomainMappings).where(eq(capabilityDataDomainMappings.id, id));
+  }
+
+  async deleteCapabilityDataAreaMapping(id: number): Promise<void> {
+    await db.delete(capabilityDataAreaMappings).where(eq(capabilityDataAreaMappings.id, id));
+  }
+
+  async deleteCapabilitySystemMapping(id: number): Promise<void> {
+    await db.delete(capabilitySystemMappings).where(eq(capabilitySystemMappings.id, id));
   }
 }
 
