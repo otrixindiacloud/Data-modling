@@ -222,7 +222,7 @@ export default function ModelerPage() {
 
         {/* Desktop layout with resizable panels - xl screens (3 panels) */}
         <div className="hidden xl:flex h-full">
-          <PanelGroup direction="horizontal" onLayout={(sizes) => {
+          <PanelGroup direction="horizontal" className="flex-1 min-h-0" onLayout={(sizes) => {
             const [dataExplorer, canvas, properties] = sizes;
             updateWidths({ 
               dataExplorer: dataExplorer || (dataExplorerCollapsed ? 4 : 25), 
@@ -235,11 +235,14 @@ export default function ModelerPage() {
               defaultSize={dataExplorerCollapsed ? 4 : widths.dataExplorer} 
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
+              className="min-h-0"
             >
-              <DataObjectExplorer 
-                isCollapsed={dataExplorerCollapsed}
-                onToggleCollapse={handleToggleDataExplorer}
-              />
+              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+                <DataObjectExplorer 
+                  isCollapsed={dataExplorerCollapsed}
+                  onToggleCollapse={handleToggleDataExplorer}
+                />
+              </div>
             </Panel>
             
             {/* Resize Handle */}
@@ -250,7 +253,7 @@ export default function ModelerPage() {
             )}
             
             {/* Main Canvas Panel */}
-            <Panel defaultSize={widths.canvas} minSize={30}>
+            <Panel defaultSize={widths.canvas} minSize={30} className="min-h-0">
               <div className="relative h-full w-full overflow-hidden">
                 <div className="h-full w-full">
                   <Canvas />
@@ -264,7 +267,7 @@ export default function ModelerPage() {
             </PanelResizeHandle>
             
             {/* Properties Panel */}
-            <Panel defaultSize={widths.properties} minSize={15} maxSize={35}>
+            <Panel defaultSize={widths.properties} minSize={15} maxSize={35} className="min-h-0 overflow-hidden">
               <EnhancedPropertiesPanel />
             </Panel>
           </PanelGroup>
@@ -272,7 +275,7 @@ export default function ModelerPage() {
 
         {/* Desktop layout with resizable panels - lg to xl screens (2 panels + collapsible data explorer) */}
         <div className="hidden lg:flex xl:hidden h-full">
-          <PanelGroup direction="horizontal" onLayout={(sizes) => {
+          <PanelGroup direction="horizontal" className="flex-1 min-h-0" onLayout={(sizes) => {
             const [dataExplorer, canvas] = sizes;
             updateWidths({ 
               dataExplorer: dataExplorer || (dataExplorerCollapsed ? 4 : 30), 
@@ -285,11 +288,14 @@ export default function ModelerPage() {
               defaultSize={dataExplorerCollapsed ? 4 : 30} 
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
+              className="min-h-0"
             >
-              <DataObjectExplorer 
-                isCollapsed={dataExplorerCollapsed}
-                onToggleCollapse={handleToggleDataExplorer}
-              />
+              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+                <DataObjectExplorer 
+                  isCollapsed={dataExplorerCollapsed}
+                  onToggleCollapse={handleToggleDataExplorer}
+                />
+              </div>
             </Panel>
             
             {/* Resize Handle */}
@@ -300,7 +306,7 @@ export default function ModelerPage() {
             )}
             
             {/* Main Canvas Panel */}
-            <Panel defaultSize={70} minSize={60}>
+            <Panel defaultSize={70} minSize={60} className="min-h-0">
               <div className="relative h-full w-full overflow-hidden">
                 <div className="h-full w-full">
                   <Canvas />

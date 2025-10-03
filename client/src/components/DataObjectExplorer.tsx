@@ -723,7 +723,7 @@ export default function DataObjectExplorer({
   );
 
   return (
-    <div className="h-full bg-sidebar border-r border-sidebar-border flex flex-col w-full min-w-[18rem] max-w-full">
+    <div className="h-full bg-sidebar border-r border-sidebar-border flex flex-col w-full min-w-[18rem] max-w-full overflow-hidden">
       <div className="p-3 border-b border-sidebar-border bg-sidebar-header">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -838,15 +838,15 @@ export default function DataObjectExplorer({
           </Collapsible>
         </div>
 
-        <div className="flex-1 flex flex-col min-h-0 px-3 pb-3">
-          <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0 px-3 pb-3 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {(objectsLoading || attributesLoading) ? (
               <div className="flex items-center justify-center py-6">
                 <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                 <span className="text-xs text-muted-foreground">Loading...</span>
               </div>
             ) : hierarchicalDomains.length > 0 || orphanObjects.length > 0 || globalUnassignedObjects.length > 0 ? (
-              <ScrollArea className="flex-1">
+              <ScrollArea className="flex-1 min-h-0 overflow-y-auto pr-2">
                 <div className="space-y-3 pb-4">
                   {globalUnassignedObjects.length > 0 && (
                     <div className="bg-white dark:bg-card border border-dashed border-primary/40 rounded-lg p-3 shadow-sm">
