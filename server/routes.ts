@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { aiEngine } from "./services/aiEngine";
-import { dataConnectors } from "./services/dataConnectors";
+import { dataConnectors, type ADLSConnectionConfig, type DatabaseConnectionConfig, type TableMetadata } from "./services/dataConnectors";
 import { exportService } from "./services/exportService";
 
 // Helper functions for data type conversion
@@ -93,7 +93,10 @@ import {
   insertAttributeSchema,
   insertRelationshipSchema,
   insertSystemSchema,
-  insertConfigurationSchema 
+  insertConfigurationSchema,
+  type DataModel,
+  type DataObject,
+  type System
 } from "@shared/schema";
 import { getTargetSystemTemplate } from "./services/targetSystemTemplates";
 import multer from "multer";
@@ -109,6 +112,307 @@ const configurationUpdateSchema = z
   .refine((data) => data.value !== undefined || data.description !== undefined, {
     message: "At least one of value or description is required",
   });
+
+const systemObjectUpdateSchema = z.object({
+  domainId: z.number().int().positive().nullable().optional(),
+  dataAreaId: z.number().int().positive().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+
+const systemSyncRequestSchema = z.object({
+  modelId: z.number().int().positive(),
+  direction: z.enum(["source", "target"] as const).default("source").optional(),
+  includeAttributes: z.boolean().default(true).optional(),
+  domainId: z.number().int().positive().nullable().optional(),
+  dataAreaId: z.number().int().positive().nullable().optional(),
+  metadataOnly: z.boolean().default(false).optional(),
+});
+
+type SystemObjectDirection = "source" | "target";
+
+function coerceNumericId(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
+function extractPreferredDomainId(system: System, override?: number | null): number | null {
+  if (typeof override === "number") {
+    return override;
+  }
+
+  const configuration = (system.configuration ?? {}) as Record<string, unknown>;
+  const direct = coerceNumericId(configuration.domainId);
+  if (direct !== null) {
+    return direct;
+  }
+
+  const domainIds = Array.isArray(configuration.domainIds)
+    ? (configuration.domainIds as unknown[])
+        .map((value) => coerceNumericId(value))
+        .filter((value): value is number => value !== null)
+    : [];
+
+  if (domainIds.length > 0) {
+    return domainIds[0];
+  }
+
+  return null;
+}
+
+function extractPreferredDataAreaIds(system: System, override?: number[] | null): number[] {
+  if (override && override.length) {
+    return override.filter((value) => Number.isFinite(value));
+  }
+
+  const configuration = (system.configuration ?? {}) as Record<string, unknown>;
+  const areaIds = Array.isArray(configuration.dataAreaIds)
+    ? (configuration.dataAreaIds as unknown[])
+        .map((value) => coerceNumericId(value))
+        .filter((value): value is number => value !== null)
+    : [];
+
+  return areaIds;
+}
+
+function mapToDatabaseConnectorType(type?: string): DatabaseConnectionConfig["type"] {
+  const normalized = (type ?? "").toLowerCase();
+  if (normalized.includes("postgres")) {
+    return "postgres";
+  }
+  if (normalized.includes("mysql") || normalized.includes("maria")) {
+    return "mysql";
+  }
+  if (normalized.includes("hana")) {
+    return "sap_hana";
+  }
+  if (normalized.includes("oracle")) {
+    return "oracle";
+  }
+  if ((normalized.includes("sql") || normalized.includes("mssql")) && !normalized.includes("nosql")) {
+    return "sql_server";
+  }
+  return "generic_sql";
+}
+
+function parseConnectionString(connectionString?: string | null): DatabaseConnectionConfig | null {
+  if (!connectionString) {
+    return null;
+  }
+
+  const trimmed = connectionString.trim();
+
+  if (trimmed.includes("://")) {
+    try {
+      const uri = new URL(trimmed);
+      const protocol = uri.protocol.replace(":", "");
+      const mappedType = mapToDatabaseConnectorType(protocol);
+      const defaultPorts: Record<DatabaseConnectionConfig["type"], number> = {
+        sql_server: 1433,
+        postgres: 5432,
+        mysql: 3306,
+        oracle: 1521,
+        sap_hana: 30015,
+        generic_sql: 1433,
+      };
+
+      const database = decodeURIComponent(uri.pathname.replace(/^\//, "")) || "default";
+      const username = decodeURIComponent(uri.username || "");
+      const password = decodeURIComponent(uri.password || "");
+      const host = uri.hostname;
+      const port = uri.port ? Number(uri.port) : defaultPorts[mappedType] ?? 1433;
+      const sslMode = uri.searchParams.get("sslmode") ?? undefined;
+      const schema = uri.searchParams.get("schema") ?? undefined;
+
+      if (!host || !username) {
+        return null;
+      }
+
+      return {
+        type: mappedType,
+        host,
+        port,
+        database,
+        username,
+        password,
+        sslMode,
+        schema,
+      } satisfies DatabaseConnectionConfig;
+    } catch (error) {
+      console.warn("Failed to parse connection URI, falling back to key-value parser:", error);
+    }
+  }
+
+  const segments = trimmed
+    .split(";")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  const values = new Map<string, string>();
+  for (const segment of segments) {
+    const [key, ...rest] = segment.split("=");
+    if (!key || rest.length === 0) continue;
+    values.set(key.trim().toLowerCase(), rest.join("=").trim());
+  }
+
+  const host = values.get("server") ?? values.get("data source") ?? values.get("host");
+  const database = values.get("database") ?? values.get("initial catalog") ?? "default";
+  const username = values.get("user id") ?? values.get("uid") ?? values.get("username");
+  const password = values.get("password") ?? values.get("pwd") ?? "";
+  const portValue = values.get("port");
+  const port = portValue ? Number(portValue) : NaN;
+
+  if (!host || !username) {
+    return null;
+  }
+
+  return {
+    type: "sql_server",
+    host,
+    port: Number.isFinite(port) ? Number(port) : 1433,
+    database,
+    username,
+    password,
+  } satisfies DatabaseConnectionConfig;
+}
+
+function buildDatabaseConfig(
+  configuration: Record<string, unknown> | null | undefined,
+  connectionString?: string | null,
+  systemType?: string
+): DatabaseConnectionConfig | null {
+  if (configuration) {
+    const host = (configuration.host as string) ?? (configuration.hostname as string);
+    const username = (configuration.username as string) ?? (configuration.user as string) ?? (configuration.userName as string);
+
+    if (host && username) {
+      const database = (configuration.database as string) ?? (configuration.db as string) ?? "default";
+      const portRaw = configuration.port ?? configuration.portNumber ?? configuration.portnum;
+      const numericPort =
+        portRaw === "" || portRaw === null || typeof portRaw === "undefined"
+          ? NaN
+          : Number(portRaw);
+      const password = (configuration.password as string) ?? (configuration.pass as string) ?? (configuration.secret as string) ?? "";
+      const mappedType = mapToDatabaseConnectorType((configuration.type as string) ?? systemType);
+      const schema = (configuration.schema as string) ?? undefined;
+      const sslMode = (configuration.sslMode as string) ?? (configuration.sslmode as string) ?? undefined;
+      const defaultPorts: Record<DatabaseConnectionConfig["type"], number> = {
+        sql_server: 1433,
+        postgres: 5432,
+        mysql: 3306,
+        oracle: 1521,
+        sap_hana: 30015,
+        generic_sql: 1433,
+      };
+      const resolvedPort = Number.isFinite(numericPort)
+        ? Number(numericPort)
+        : defaultPorts[mappedType] ?? 1433;
+
+      return {
+        type: mappedType,
+        host,
+        port: resolvedPort,
+        database,
+        username,
+        password,
+        schema,
+        sslMode,
+      } satisfies DatabaseConnectionConfig;
+    }
+  }
+
+  return parseConnectionString(connectionString);
+}
+
+function buildAdlsConfig(
+  configuration: Record<string, unknown> | null | undefined,
+): ADLSConnectionConfig | null {
+  if (!configuration) {
+    return null;
+  }
+
+  const storageAccount = (configuration.storageAccount as string) ?? (configuration.accountName as string) ?? (configuration.account as string);
+  const containerName = (configuration.containerName as string) ?? (configuration.container as string);
+
+  if (!storageAccount || !containerName) {
+    return null;
+  }
+
+  return {
+    type: "adls_gen2",
+    storageAccount,
+    containerName,
+    path: ((configuration.path as string) ?? (configuration.directory as string) ?? "") || "",
+    sasToken: (configuration.sasToken as string) ?? (configuration.sas_token as string) ?? undefined,
+    accessKey: (configuration.accessKey as string) ?? (configuration.access_key as string) ?? undefined,
+  } satisfies ADLSConnectionConfig;
+}
+
+async function testSystemConnectivity(
+  system: System,
+  override?: {
+    type?: string;
+    configuration?: Record<string, unknown>;
+    connectionString?: string | null;
+  }
+): Promise<{ connected: boolean; message?: string }> {
+  const effectiveType = (override?.type ?? system.type ?? "").toLowerCase();
+  const configuration = (override?.configuration ?? system.configuration ?? {}) as Record<string, unknown>;
+  const connectionString = override?.connectionString ?? system.connectionString ?? null;
+
+  if (effectiveType === "adls") {
+    const adlsConfig = buildAdlsConfig(configuration);
+    if (!adlsConfig) {
+      return { connected: false, message: "Missing ADLS configuration" };
+    }
+
+    const connected = await dataConnectors.testADLSConnection(adlsConfig);
+    return { connected, message: connected ? undefined : "Connection test failed" };
+  }
+
+  const dbConfig = buildDatabaseConfig(configuration, connectionString, effectiveType);
+  if (!dbConfig) {
+    return { connected: false, message: "Missing connection details" };
+  }
+
+  const connected = await dataConnectors.testDatabaseConnection(dbConfig);
+  return { connected, message: connected ? undefined : "Connection test failed" };
+}
+
+async function retrieveSystemMetadata(
+  system: System,
+  options?: {
+    configurationOverride?: Record<string, unknown>;
+    connectionStringOverride?: string | null;
+  }
+): Promise<TableMetadata[]> {
+  const effectiveType = (system.type ?? "").toLowerCase();
+  const configuration = (options?.configurationOverride ?? system.configuration ?? {}) as Record<string, unknown>;
+  const connectionString = options?.connectionStringOverride ?? system.connectionString ?? null;
+
+  if (effectiveType === "adls") {
+    const adlsConfig = buildAdlsConfig(configuration);
+    if (!adlsConfig) {
+      return [];
+    }
+    return await dataConnectors.listADLSDatasets(adlsConfig);
+  }
+
+  const dbConfig =
+    buildDatabaseConfig(configuration, connectionString, system.type) ?? ({
+      type: "sql_server",
+      host: "localhost",
+      port: 1433,
+      database: "default",
+      username: system.name ?? "system",
+      password: "",
+    } satisfies DatabaseConnectionConfig);
+
+  return await dataConnectors.extractDatabaseMetadata(dbConfig);
+}
 
 async function upsertConfigurationEntry(input: unknown) {
   const validatedData = insertConfigurationSchema.parse(input);
@@ -176,24 +480,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create model with all 3 layers (Conceptual, Logical, Physical)
   app.post("/api/models/create-with-layers", async (req, res) => {
     try {
-      const { name, targetSystem } = req.body;
-      
+      const { name, targetSystem, targetSystemId, domainId, dataAreaId } = req.body;
+
       if (!name) {
         return res.status(400).json({ message: "Model name is required" });
       }
 
-      const selectedTargetSystem = targetSystem || "Data Lake";
+      const parseOptionalNumber = (value: unknown): number | null => {
+        if (value === undefined || value === null || value === "") {
+          return null;
+        }
+        const parsed = Number(value);
+        return Number.isNaN(parsed) ? null : parsed;
+      };
 
-      // Find the target system ID by name
       const systems = await storage.getSystems();
-      const targetSystemRecord = systems.find(s => s.name === selectedTargetSystem);
-      const targetSystemId = targetSystemRecord?.id || null;
+      const parsedTargetSystemId = parseOptionalNumber(targetSystemId);
+      let targetSystemRecord = parsedTargetSystemId
+        ? systems.find((s) => s.id === parsedTargetSystemId)
+        : undefined;
+
+      if (!targetSystemRecord && targetSystem) {
+        targetSystemRecord = systems.find((s) => s.name === targetSystem);
+      }
+
+      const selectedTargetSystem = targetSystemRecord?.name || targetSystem || "Data Lake";
+      const resolvedTargetSystemId = targetSystemRecord?.id ?? null;
+
+      const parsedDomainId = parseOptionalNumber(domainId);
+      let domainRecord = parsedDomainId ? await storage.getDataDomain(parsedDomainId) : null;
+      if (parsedDomainId && !domainRecord) {
+        return res.status(400).json({ message: "Selected domain does not exist" });
+      }
+
+      const parsedDataAreaId = parseOptionalNumber(dataAreaId);
+      let dataAreaRecord = parsedDataAreaId ? await storage.getDataArea(parsedDataAreaId) : null;
+      if (parsedDataAreaId && !dataAreaRecord) {
+        return res.status(400).json({ message: "Selected data area does not exist" });
+      }
+
+      if (dataAreaRecord) {
+        if (domainRecord && dataAreaRecord.domainId !== domainRecord.id) {
+          return res.status(400).json({ message: "Selected data area does not belong to the provided domain" });
+        }
+        if (!domainRecord) {
+          domainRecord = await storage.getDataDomain(dataAreaRecord.domainId) ?? null;
+        }
+      }
+
+      const resolvedDomainId = domainRecord?.id ?? null;
+      const resolvedDataAreaId = dataAreaRecord?.id ?? null;
 
       // Create conceptual model first (parent model)
       const conceptualModel = await storage.createDataModel({
         name: name,
         layer: "conceptual",
-        targetSystemId: targetSystemId,
+        targetSystemId: resolvedTargetSystemId,
+        domainId: resolvedDomainId,
+        dataAreaId: resolvedDataAreaId,
       });
 
       // Create logical model linked to conceptual
@@ -201,7 +545,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: name,
         layer: "logical", 
         parentModelId: conceptualModel.id,
-        targetSystemId: targetSystemId,
+        targetSystemId: resolvedTargetSystemId,
+        domainId: resolvedDomainId,
+        dataAreaId: resolvedDataAreaId,
       });
 
       // Create physical model linked to conceptual
@@ -209,7 +555,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: name,
         layer: "physical",
         parentModelId: conceptualModel.id,
-        targetSystemId: targetSystemId,
+        targetSystemId: resolvedTargetSystemId,
+        domainId: resolvedDomainId,
+        dataAreaId: resolvedDataAreaId,
       });
 
       // Get template objects and attributes for the selected target system
@@ -270,13 +618,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           const basePosition = templateObj.position || { x: 0, y: 0 };
-          const templateMetadata = {
+          const templateMetadata: Record<string, any> = {
             createdFromTemplate: true,
             templateName: selectedTargetSystem,
             templateObjectType: templateObj.type,
           };
 
-          const layerConfigBase = {
+          const layerConfigBase: Record<string, any> = {
             position: basePosition,
             template: selectedTargetSystem,
           };
@@ -288,7 +636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             domainId: domainId,
             dataAreaId: areaId,
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             isNew: false,
             position: basePosition
           });
@@ -296,14 +644,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.createDataModelObject({
             objectId: conceptualObject.id,
             modelId: conceptualModel.id,
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             position: basePosition,
             metadata: templateMetadata,
             isVisible: true,
             layerSpecificConfig: {
               ...layerConfigBase,
               layer: "conceptual"
-            }
+            } as Record<string, any>
           });
 
           // Create object in logical layer
@@ -313,7 +661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             domainId: domainId,
             dataAreaId: areaId,
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             isNew: false,
             position: basePosition
           });
@@ -321,14 +669,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.createDataModelObject({
             objectId: logicalObject.id,
             modelId: logicalModel.id,
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             position: basePosition,
             metadata: templateMetadata,
             isVisible: true,
             layerSpecificConfig: {
               ...layerConfigBase,
               layer: "logical"
-            }
+            } as Record<string, any>
           });
 
           // Create object in physical layer
@@ -338,7 +686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             domainId: domainId,
             dataAreaId: areaId,
             sourceSystemId: await getSystemId(templateObj.sourceSystem),
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             isNew: false,
             position: basePosition
           });
@@ -346,14 +694,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.createDataModelObject({
             objectId: physicalObject.id,
             modelId: physicalModel.id,
-            targetSystemId: targetSystemId,
+            targetSystemId: resolvedTargetSystemId,
             position: basePosition,
             metadata: templateMetadata,
             isVisible: true,
             layerSpecificConfig: {
               ...layerConfigBase,
               layer: "physical"
-            }
+            } as Record<string, any>
           });
 
           // Create attributes for logical and physical layers (conceptual layer doesn't show attributes)
@@ -585,6 +933,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/areas/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteDataArea(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete area:", error);
+      res.status(500).json({ message: "Failed to delete area" });
+    }
+  });
+
   // Data Objects
   app.get("/api/models/:modelId/objects", async (req, res) => {
     try {
@@ -634,15 +993,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(dataModelObject);
     } catch (error) {
       console.error("Error adding object to model:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      const stack = error instanceof Error ? error.stack : undefined;
       console.error("Error details:", {
         modelId: req.params.modelId,
         objectId: req.body.objectId,
-        error: error.message,
-        stack: error.stack
+        error: message,
+        stack,
       });
       res.status(500).json({ 
         message: "Failed to add object to model",
-        error: error.message 
+        error: message 
       });
     }
   });
@@ -1071,12 +1432,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/sources/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const system = await storage.getSystem(id);
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+      res.json(system);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch system" });
+    }
+  });
+
   app.get("/api/systems", async (req, res) => {
     try {
       const systems = await storage.getSystems();
       res.json(systems);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch systems" });
+    }
+  });
+
+  app.get("/api/systems/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const system = await storage.getSystem(id);
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+      res.json(system);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch system" });
     }
   });
 
@@ -1190,6 +1577,380 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/systems/:id/objects", async (req, res) => {
+    try {
+      const systemId = parseInt(req.params.id);
+      if (!Number.isFinite(systemId)) {
+        return res.status(400).json({ message: "Invalid system id" });
+      }
+
+      const system = await storage.getSystem(systemId);
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+
+      const roleParam = typeof req.query.role === "string" ? req.query.role.toLowerCase() : "all";
+      const role: SystemObjectDirection | "all" = roleParam === "source" || roleParam === "target" ? (roleParam as SystemObjectDirection) : "all";
+
+      let objects: DataObject[] = [];
+      if (role === "source") {
+        objects = await storage.getDataObjectsBySourceSystem(systemId);
+      } else if (role === "target") {
+        objects = await storage.getDataObjectsByTargetSystem(systemId);
+      } else {
+        const [sourceObjects, targetObjects] = await Promise.all([
+          storage.getDataObjectsBySourceSystem(systemId),
+          storage.getDataObjectsByTargetSystem(systemId),
+        ]);
+        const dedup = new Map<number, DataObject>();
+        sourceObjects.forEach((object) => dedup.set(object.id, object));
+        targetObjects.forEach((object) => dedup.set(object.id, object));
+        objects = Array.from(dedup.values());
+      }
+
+      const [models, attributes] = await Promise.all([
+        storage.getDataModels(),
+        storage.getAllAttributes(),
+      ]);
+
+      const attributeCounts = new Map<number, number>();
+      attributes.forEach((attribute) => {
+        const count = attributeCounts.get(attribute.objectId) ?? 0;
+        attributeCounts.set(attribute.objectId, count + 1);
+      });
+
+      const modelMap = new Map<number, DataModel>();
+      models.forEach((model) => modelMap.set(model.id, model));
+
+      const enriched = objects.map((object) => {
+        const modelInfo = modelMap.get(object.modelId);
+        return {
+          ...object,
+          attributeCount: attributeCounts.get(object.id) ?? 0,
+          model: modelInfo
+            ? {
+                id: modelInfo.id,
+                name: modelInfo.name,
+                layer: modelInfo.layer,
+              }
+            : null,
+          systemAssociation:
+            object.sourceSystemId === systemId
+              ? "source"
+              : object.targetSystemId === systemId
+                ? "target"
+                : null,
+        };
+      });
+
+      res.json(enriched);
+    } catch (error) {
+      console.error("Failed to fetch system objects:", error);
+      res.status(500).json({ message: "Failed to fetch system objects" });
+    }
+  });
+
+  app.patch("/api/systems/:id/objects/:objectId", async (req, res) => {
+    try {
+      const systemId = parseInt(req.params.id);
+      const objectId = parseInt(req.params.objectId);
+      if (!Number.isFinite(systemId) || !Number.isFinite(objectId)) {
+        return res.status(400).json({ message: "Invalid identifiers" });
+      }
+
+      const [system, object] = await Promise.all([
+        storage.getSystem(systemId),
+        storage.getDataObject(objectId),
+      ]);
+
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+
+      if (!object) {
+        return res.status(404).json({ message: "Object not found" });
+      }
+
+      const association: SystemObjectDirection | null = object.sourceSystemId === systemId
+        ? "source"
+        : object.targetSystemId === systemId
+          ? "target"
+          : null;
+
+      if (!association) {
+        return res.status(400).json({ message: "Object is not associated with this system" });
+      }
+
+      const parsed = systemObjectUpdateSchema.parse(req.body ?? {});
+
+      let domainId = parsed.domainId ?? null;
+      let dataAreaId = parsed.dataAreaId ?? null;
+
+      if (domainId !== null) {
+        const domain = await storage.getDataDomain(domainId);
+        if (!domain) {
+          return res.status(400).json({ message: "Provided domain does not exist" });
+        }
+      }
+
+      if (dataAreaId !== null) {
+        const area = await storage.getDataArea(dataAreaId);
+        if (!area) {
+          return res.status(400).json({ message: "Provided data area does not exist" });
+        }
+        if (domainId !== null && area.domainId !== domainId) {
+          return res.status(400).json({ message: "Data area does not belong to the specified domain" });
+        }
+        if (domainId === null) {
+          domainId = area.domainId;
+        }
+      }
+
+      const updated = await storage.updateDataObject(objectId, {
+        domainId,
+        dataAreaId,
+        description: parsed.description ?? object.description,
+      });
+
+      res.json({
+        ...updated,
+        systemAssociation: association,
+      });
+    } catch (error) {
+      console.error("Failed to update system object:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid payload", details: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to update system object" });
+      }
+    }
+  });
+
+  app.delete("/api/systems/:id/objects/:objectId", async (req, res) => {
+    try {
+      const systemId = parseInt(req.params.id);
+      const objectId = parseInt(req.params.objectId);
+      if (!Number.isFinite(systemId) || !Number.isFinite(objectId)) {
+        return res.status(400).json({ message: "Invalid identifiers" });
+      }
+
+      const [system, object] = await Promise.all([
+        storage.getSystem(systemId),
+        storage.getDataObject(objectId),
+      ]);
+
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+
+      if (!object) {
+        return res.status(404).json({ message: "Object not found" });
+      }
+
+      if (object.sourceSystemId !== systemId && object.targetSystemId !== systemId) {
+        return res.status(400).json({ message: "Object is not associated with this system" });
+      }
+
+      await storage.deleteDataModelObjectsByObject(objectId);
+      await storage.deleteAttributesByObject(objectId);
+      await storage.deleteDataObject(objectId);
+
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to remove system object:", error);
+      res.status(500).json({ message: "Failed to remove system object" });
+    }
+  });
+
+  app.post("/api/systems/:id/sync-objects", async (req, res) => {
+    try {
+      const systemId = parseInt(req.params.id);
+      if (!Number.isFinite(systemId)) {
+        return res.status(400).json({ message: "Invalid system id" });
+      }
+
+      const system = await storage.getSystem(systemId);
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+
+      const parsed = systemSyncRequestSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid sync request", details: parsed.error.flatten() });
+      }
+
+  const { modelId, direction = "source", includeAttributes = true, domainId, dataAreaId, metadataOnly } = parsed.data;
+
+      if (direction === "source" && system.canBeSource === false) {
+        return res.status(400).json({ message: "System cannot act as a source" });
+      }
+
+      if (direction === "target" && system.canBeTarget === false) {
+        return res.status(400).json({ message: "System cannot act as a target" });
+      }
+
+      const model = await storage.getDataModel(modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
+      let effectiveDomainId = extractPreferredDomainId(system, domainId ?? null);
+      let effectiveDataAreaId = dataAreaId ?? null;
+
+      if (effectiveDataAreaId === null) {
+        const preferredAreas = extractPreferredDataAreaIds(system);
+        if (preferredAreas.length > 0) {
+          effectiveDataAreaId = preferredAreas[0];
+        }
+      }
+
+      if (effectiveDataAreaId !== null) {
+        const area = await storage.getDataArea(effectiveDataAreaId);
+        if (!area) {
+          return res.status(400).json({ message: "Provided data area does not exist" });
+        }
+        if (effectiveDomainId !== null && area.domainId !== effectiveDomainId) {
+          return res.status(400).json({ message: "Data area does not belong to the specified domain" });
+        }
+        if (effectiveDomainId === null) {
+          effectiveDomainId = area.domainId;
+        }
+      }
+
+      if (effectiveDomainId !== null) {
+        const domain = await storage.getDataDomain(effectiveDomainId);
+        if (!domain) {
+          return res.status(400).json({ message: "Provided domain does not exist" });
+        }
+      }
+
+      const connectionOverrides =
+        req.body?.connection && typeof req.body.connection === "object"
+          ? (req.body.connection as { configuration?: Record<string, unknown>; connectionString?: string | null })
+          : undefined;
+
+      const metadata = await retrieveSystemMetadata(system, {
+        configurationOverride: connectionOverrides?.configuration,
+        connectionStringOverride: connectionOverrides?.connectionString ?? null,
+      });
+
+      if (metadataOnly) {
+        return res.json({ metadata });
+      }
+
+      const existingObjects = await storage.getDataObjectsByModel(modelId);
+      const relevantExisting = new Map<string, DataObject>();
+      existingObjects.forEach((object) => {
+        const association: SystemObjectDirection | null = object.sourceSystemId === systemId
+          ? "source"
+          : object.targetSystemId === systemId
+            ? "target"
+            : null;
+        if (association === direction) {
+          relevantExisting.set(object.name.toLowerCase(), object);
+        }
+      });
+
+      const created: DataObject[] = [];
+      const updated: DataObject[] = [];
+      const attributeSummary: Record<string, number> = {};
+
+      for (const table of metadata) {
+        const tableKey = table.name.toLowerCase();
+  const existingObject = relevantExisting.get(tableKey);
+        const metadataPayload: Record<string, any> = {
+          ...(existingObject?.metadata ?? {}),
+          syncedFromSystemId: systemId,
+          systemDirection: direction,
+          rawMetadata: table,
+          syncedAt: new Date().toISOString(),
+        };
+
+        if (existingObject) {
+          const updatedObject = await storage.updateDataObject(existingObject.id, {
+            metadata: metadataPayload,
+            domainId: effectiveDomainId ?? existingObject.domainId ?? null,
+            dataAreaId: effectiveDataAreaId ?? existingObject.dataAreaId ?? null,
+            sourceSystemId: direction === "source" ? systemId : existingObject.sourceSystemId,
+            targetSystemId: direction === "target" ? systemId : existingObject.targetSystemId,
+            isNew: false,
+          });
+          updated.push(updatedObject);
+
+          if (includeAttributes && Array.isArray(table.columns)) {
+            await storage.deleteAttributesByObject(updatedObject.id);
+            let attributeCount = 0;
+            for (let index = 0; index < table.columns.length; index++) {
+              const column = table.columns[index];
+              await storage.createAttribute({
+                name: column.name,
+                objectId: updatedObject.id,
+                conceptualType: column.type,
+                logicalType: column.type,
+                physicalType: column.type,
+                nullable: column.nullable ?? true,
+                isPrimaryKey: column.isPrimaryKey ?? false,
+                dataType: column.type,
+                orderIndex: index,
+              });
+              attributeCount += 1;
+            }
+            attributeSummary[updatedObject.id.toString()] = attributeCount;
+          }
+        } else {
+          const createdObject = await storage.createDataObject({
+            name: table.name,
+            modelId,
+            domainId: effectiveDomainId ?? null,
+            dataAreaId: effectiveDataAreaId ?? null,
+            sourceSystemId: direction === "source" ? systemId : null,
+            targetSystemId: direction === "target" ? systemId : null,
+            metadata: metadataPayload,
+            objectType: Array.isArray(table.columns) && table.columns.length ? "table" : "entity",
+            isNew: true,
+          });
+          created.push(createdObject);
+
+          if (includeAttributes && Array.isArray(table.columns)) {
+            let attributeCount = 0;
+            for (let index = 0; index < table.columns.length; index++) {
+              const column = table.columns[index];
+              await storage.createAttribute({
+                name: column.name,
+                objectId: createdObject.id,
+                conceptualType: column.type,
+                logicalType: column.type,
+                physicalType: column.type,
+                nullable: column.nullable ?? true,
+                isPrimaryKey: column.isPrimaryKey ?? false,
+                dataType: column.type,
+                orderIndex: index,
+              });
+              attributeCount += 1;
+            }
+            attributeSummary[createdObject.id.toString()] = attributeCount;
+          }
+        }
+      }
+
+      res.json({
+        metadataCount: metadata.length,
+        createdCount: created.length,
+        updatedCount: updated.length,
+        created,
+        updated,
+        attributes: attributeSummary,
+      });
+    } catch (error) {
+      console.error("Failed to sync system objects:", error);
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid sync payload", details: error.errors });
+      } else {
+        res.status(500).json({ message: "Failed to sync system objects" });
+      }
+    }
+  });
+
   app.post("/api/sources/test-connection", async (req, res) => {
     try {
       const { type, configuration } = req.body;
@@ -1203,6 +1964,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({ connected: isConnected });
     } catch (error) {
+      res.status(500).json({ message: "Connection test failed" });
+    }
+  });
+
+  app.post("/api/systems/:id/test-connection", async (req, res) => {
+    try {
+      const systemId = parseInt(req.params.id);
+      if (!Number.isFinite(systemId)) {
+        return res.status(400).json({ message: "Invalid system id" });
+      }
+
+      const system = await storage.getSystem(systemId);
+      if (!system) {
+        return res.status(404).json({ message: "System not found" });
+      }
+
+      const overrideConfiguration =
+        req.body?.configuration && typeof req.body.configuration === "object"
+          ? (req.body.configuration as Record<string, unknown>)
+          : undefined;
+
+      const result = await testSystemConnectivity(system, {
+        type: req.body?.type,
+        configuration: overrideConfiguration,
+        connectionString: req.body?.connectionString,
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to test system connection:", error);
       res.status(500).json({ message: "Connection test failed" });
     }
   });
@@ -1303,9 +2094,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const layer = req.query.layer as string || "conceptual";
     
     try {
-      // Get only the objects that are visible in this specific model layer
-      const modelObjects = await storage.getDataModelObjects();
-      const visibleModelObjects = modelObjects.filter(mo => mo.isVisible);
+  // Get only the objects that belong to this model and are visible in this layer
+  const modelObjects = await storage.getDataModelObjectsByModel(modelId);
+  const visibleModelObjects = modelObjects.filter(mo => mo.isVisible !== false);
       
       const relationships = await storage.getRelationshipsByModel(modelId);
       
@@ -1331,13 +2122,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let position = { x: 0, y: 0 };
         if (modelObj.layerSpecificConfig && typeof modelObj.layerSpecificConfig === 'object') {
           const config = modelObj.layerSpecificConfig as any;
-          if (config.position) {
+
+          if (config.layers && typeof config.layers === 'object') {
+            const layerKey = layer || config.layer;
+            const layerConfig = (layerKey && config.layers[layerKey]) || (config.layer && config.layers[config.layer]);
+            if (layerConfig?.position) {
+              position = layerConfig.position;
+            }
+          }
+
+          if (position.x === 0 && position.y === 0 && config.position) {
             position = config.position;
           }
         }
+
+        // Fallback to model object level position
+        if ((position.x === 0 && position.y === 0) && modelObj.position) {
+          const modelPosition = modelObj.position as any;
+          if (typeof modelPosition === 'string') {
+            try {
+              position = JSON.parse(modelPosition);
+            } catch (e) {
+              console.warn("Failed to parse model object position:", modelPosition);
+            }
+          } else {
+            position = modelPosition;
+          }
+        }
         
-        // Fallback to global position if no layer-specific position
-        if (position.x === 0 && position.y === 0 && obj.position) {
+        // Fallback to global data object position if still not set
+        if ((position.x === 0 && position.y === 0) && obj.position) {
           if (typeof obj.position === 'string') {
             try {
               position = JSON.parse(obj.position);
@@ -1354,10 +2168,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: 'dataObject',
           position,
           data: {
+            modelObjectId: modelObj.id,
             name: obj.name,
             objectId: obj.id,
-            domain: domain?.name,
-            dataArea: area?.name,
+            domain: domain?.name || 'Uncategorized',
+            dataArea: area?.name || 'General',
             attributes: attributes,
             sourceSystem: obj.sourceSystemId,
             targetSystem: obj.targetSystemId,
@@ -1417,24 +2232,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Canvas position saving endpoint
   app.post("/api/models/:id/canvas/positions", async (req, res) => {
     try {
-      const modelId = parseInt(req.params.id);
-      const { positions, layer } = req.body; // Array of { objectId: number, position: { x: number, y: number } }
+  const modelId = parseInt(req.params.id);
+  const { positions, layer } = req.body; // Array of { modelObjectId?: number, objectId?: number, position: { x: number, y: number } }
       
       if (!Array.isArray(positions)) {
         return res.status(400).json({ message: "Positions must be an array" });
       }
       
       // Get all model objects for this model to validate they exist
-      const modelObjects = await storage.getDataModelObjects();
-      const validModelObjects = new Map(modelObjects.map(mo => [mo.objectId, mo.id]));
+  const modelObjects = await storage.getDataModelObjectsByModel(modelId);
+  const modelObjectsByObjectId = new Map(modelObjects.map(mo => [mo.objectId, mo]));
+  const modelObjectsById = new Map(modelObjects.map(mo => [mo.id, mo]));
       
       // Filter positions to only include objects that exist in this model
-      const validPositions = positions.filter(({ objectId }) => {
-        const isValid = validModelObjects.has(objectId);
-        if (!isValid) {
-          console.warn(`Object ${objectId} not found in model ${modelId}, skipping position update`);
+      const validPositions = positions.filter(({ objectId, modelObjectId }) => {
+        if (typeof modelObjectId === 'number') {
+          const exists = modelObjectsById.has(modelObjectId);
+          if (!exists) {
+            console.warn(`Model object ${modelObjectId} not found in model ${modelId}, skipping position update`);
+          }
+          return exists;
         }
-        return isValid;
+
+        if (typeof objectId === 'number') {
+          const exists = modelObjectsByObjectId.has(objectId);
+          if (!exists) {
+            console.warn(`Object ${objectId} not found in model ${modelId}, skipping position update`);
+          }
+          return exists;
+        }
+
+        console.warn(`Invalid position payload without identifiers, skipping entry`);
+        return false;
       });
       
       if (validPositions.length === 0) {
@@ -1442,20 +2271,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Update each model object's layer-specific position in the layer_specific_config
-      const updates = validPositions.map(async ({ objectId, position }) => {
-        if (typeof objectId !== 'number' || !position || typeof position.x !== 'number' || typeof position.y !== 'number') {
-          throw new Error(`Invalid position data for object ${objectId}`);
+      const updates = validPositions.map(async ({ objectId, modelObjectId, position }) => {
+        if (!position || typeof position.x !== 'number' || typeof position.y !== 'number') {
+          throw new Error(`Invalid position data for payload ${JSON.stringify({ objectId, modelObjectId })}`);
         }
-        
-        const modelObjectId = validModelObjects.get(objectId);
-        if (!modelObjectId) {
-          throw new Error(`Model object not found for object ${objectId}`);
+
+        let modelObject = typeof modelObjectId === 'number'
+          ? modelObjectsById.get(modelObjectId)
+          : undefined;
+
+        if (!modelObject && typeof objectId === 'number') {
+          modelObject = modelObjectsByObjectId.get(objectId);
+        }
+
+        if (!modelObject) {
+          throw new Error(`Model object not found for payload ${JSON.stringify({ objectId, modelObjectId })}`);
         }
         
         // Get the current model object to preserve existing config
-        const currentModelObject = await storage.getDataModelObject(modelObjectId);
+        const currentModelObject = await storage.getDataModelObject(modelObject.id);
         if (!currentModelObject) {
-          throw new Error(`Model object ${modelObjectId} not found`);
+          throw new Error(`Model object ${modelObject.id} not found`);
         }
         
         // Update the layer-specific configuration with the new position
@@ -1463,14 +2299,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (currentModelObject.layerSpecificConfig && typeof currentModelObject.layerSpecificConfig === 'object') {
           layerConfig = { ...currentModelObject.layerSpecificConfig };
         }
-        
-        layerConfig = {
-          ...layerConfig,
-          position: position
+
+        const layerKey = typeof layer === 'string' && layer.length > 0
+          ? layer
+          : (typeof (layerConfig as any).layer === 'string' ? (layerConfig as any).layer : 'conceptual');
+
+        const existingLayers = (layerConfig as any).layers && typeof (layerConfig as any).layers === 'object'
+          ? { ...(layerConfig as any).layers }
+          : {};
+
+        const nextLayerConfig = {
+          ...existingLayers[layerKey],
+          position
         };
-        
-        return storage.updateDataModelObject(modelObjectId, { 
-          layerSpecificConfig: layerConfig 
+
+        const updatedConfig = {
+          ...layerConfig,
+          position, // maintain backwards compatibility
+          layers: {
+            ...existingLayers,
+            [layerKey]: nextLayerConfig
+          },
+          lastUpdatedLayer: layerKey
+        } as Record<string, any>;
+
+        return storage.updateDataModelObject(modelObject.id, { 
+          layerSpecificConfig: updatedConfig,
+          position
         });
       });
       
@@ -1567,6 +2422,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(suggestions);
     } catch (error) {
       res.status(500).json({ message: "Failed to generate normalization suggestions" });
+    }
+  });
+
+  app.get("/api/system-metrics", async (_req, res) => {
+    try {
+      const [configs, models, systemsList, objects, attrs, rels] = await Promise.all([
+        storage.getConfigurations(),
+        storage.getDataModels(),
+        storage.getSystems(),
+        storage.getDataObjects(),
+        storage.getAttributes(),
+        storage.getRelationships(),
+      ]);
+
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const modifiedToday = configs.filter((config) => {
+        if (!config.updatedAt) return false;
+        const updatedAt = new Date(config.updatedAt);
+        return updatedAt >= startOfDay;
+      }).length;
+
+      const lastUpdatedConfig = configs.reduce<Date | null>((latest, config) => {
+        if (!config.updatedAt) return latest;
+        const updatedAt = new Date(config.updatedAt);
+        if (!latest || updatedAt > latest) {
+          return updatedAt;
+        }
+        return latest;
+      }, null);
+
+      const requiredConfigKeys: Record<string, string[]> = {
+        ai: [
+          "openai_model",
+          "temperature",
+          "max_tokens",
+          "confidence_threshold",
+          "enable_suggestions",
+          "enable_domain_suggestions",
+          "enable_relationship_suggestions",
+          "enable_normalization_suggestions",
+          "max_suggestions",
+          "analysis_timeout",
+        ],
+        ui: [
+          "auto_save_interval",
+          "enable_mini_map",
+          "enable_auto_save",
+          "theme",
+          "canvas_zoom_sensitivity",
+          "show_grid",
+          "snap_to_grid",
+          "grid_size",
+        ],
+        export: [
+          "default_format",
+          "include_comments",
+          "include_constraints",
+          "include_indexes",
+          "compression_enabled",
+          "max_file_size_mb",
+        ],
+        connection: [
+          "max_connections",
+          "connection_timeout",
+          "retry_attempts",
+          "rate_limit_per_minute",
+          "enable_connection_pooling",
+        ],
+      };
+
+      const categoryStats = Array.from(
+        configs.reduce((map, config) => {
+          const list = map.get(config.category) ?? [];
+          list.push(config);
+          map.set(config.category, list);
+          return map;
+        }, new Map<string, typeof configs>())
+      ).map(([category, entries]) => {
+        const missingKeys = (requiredConfigKeys[category] ?? []).filter(
+          (key) => !entries.some((entry) => entry.key === key)
+        );
+
+        return {
+          name: category,
+          count: entries.length,
+          missingKeys,
+        };
+      });
+
+      const missingKeys = categoryStats.flatMap((category) =>
+        category.missingKeys.map((key) => `${category.name}.${key}`)
+      );
+
+      const conceptualModels = models.filter((model) => model.layer === "conceptual").length;
+      const logicalModels = models.filter((model) => model.layer === "logical").length;
+      const physicalModels = models.filter((model) => model.layer === "physical").length;
+
+      const connectedSystems = systemsList.filter((system) => system.status === "connected").length;
+      const errorSystems = systemsList.filter((system) => system.status === "error").length;
+      const disconnectedSystems =
+        systemsList.length - connectedSystems - errorSystems;
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        configuration: {
+          totalConfigs: configs.length,
+          modifiedToday,
+          lastUpdated: lastUpdatedConfig ? lastUpdatedConfig.toISOString() : null,
+          categories: categoryStats,
+          missingKeys,
+        },
+        models: {
+          total: models.length,
+          conceptual: conceptualModels,
+          logical: logicalModels,
+          physical: physicalModels,
+        },
+        objects: {
+          total: objects.length,
+          attributes: attrs.length,
+          relationships: rels.length,
+        },
+        systems: {
+          total: systemsList.length,
+          connected: connectedSystems,
+          disconnected: Math.max(disconnectedSystems, 0),
+          error: errorSystems,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to load system metrics", error);
+      res.status(500).json({ message: "Failed to load system metrics" });
     }
   });
 

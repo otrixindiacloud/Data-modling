@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Settings, Database, Target, Edit, Trash2, Save, X, ArrowLeft, Palette } from "lucide-react";
+import { Plus, Settings, Target, Edit, Trash2, ArrowLeft, Save, X, Server } from "lucide-react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,65 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { System } from "@shared/schema";
 import ColorConfiguration from "@/components/ColorConfiguration";
-
-interface SystemConfig {
-  id?: number;
-  name: string;
-  category: string;
-  type: string; // Connection type (sql, file, api, etc.)
-  description: string;
-  connectionString?: string;
-  configuration: Record<string, any>;
-  canBeSource?: boolean;
-  canBeTarget?: boolean;
-  colorCode?: string;
-}
-
-// Unified system categories - each system can be both source and target
-const SYSTEM_CATEGORIES = [
-  "Enterprise Resource Planning (ERP)",
-  "Customer Relationship Management (CRM)", 
-  "Human Resources Information System (HRIS)",
-  "Financial Management System",
-  "Supply Chain Management",
-  "Business Intelligence",
-  "Legacy Database",
-  "Cloud Application",
-  "File System",
-  "API Service",
-  "Data Lake",
-  "Data Warehouse", 
-  "Operational Database",
-  "Analytics Platform",
-  "Cloud Storage",
-  "Real-time Stream",
-  "API Endpoint",
-  "Reporting System"
-];
-
-const CONNECTION_TYPES = [
-  { value: "sql", label: "SQL Database" },
-  { value: "nosql", label: "NoSQL Database" },
-  { value: "file", label: "File System" },
-  { value: "api", label: "REST API" },
-  { value: "adls", label: "Azure Data Lake" },
-  { value: "s3", label: "Amazon S3" },
-  { value: "kafka", label: "Apache Kafka" },
-  { value: "sftp", label: "SFTP Server" }
-];
 
 export default function ConfigurationPage() {
   const [selectedTab, setSelectedTab] = useState("systems");
-  const [editingSystem, setEditingSystem] = useState<SystemConfig | null>(null);
-  const [isAddingSystem, setIsAddingSystem] = useState(false);
   const [editingDomain, setEditingDomain] = useState<any>(null);
   const [isAddingDomain, setIsAddingDomain] = useState(false);
+  const [editingArea, setEditingArea] = useState<any>(null);
+  const [isAddingArea, setIsAddingArea] = useState(false);
+  const [selectedDomainForArea, setSelectedDomainForArea] = useState<any>(null);
   const [aiConfig, setAiConfig] = useState({
     openaiModel: "gpt-4o",
     temperature: 0.7,
@@ -101,15 +55,6 @@ export default function ConfigurationPage() {
   const queryClient = useQueryClient();
   const [location, setLocation] = useLocation();
 
-  // Fetch existing data sources
-  const { data: dataSources = [] } = useQuery({
-    queryKey: ["/api/sources"],
-    queryFn: async () => {
-      const response = await fetch("/api/sources");
-      return response.json();
-    }
-  });
-
   // Fetch existing domains
   const { data: domains = [] } = useQuery({
     queryKey: ["/api/domains"],
@@ -119,54 +64,11 @@ export default function ConfigurationPage() {
     }
   });
 
-  // Create/Update system mutation
-  const saveSystemMutation = useMutation({
-    mutationFn: async (system: SystemConfig) => {
-      const url = system.id ? `/api/sources/${system.id}` : "/api/sources";
-      const method = system.id ? "PUT" : "POST";
-      
-      const response = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: system.name,
-          category: system.category,
-          type: system.type,
-          description: system.description,
-          connectionString: system.connectionString,
-          configuration: system.configuration,
-          canBeSource: system.canBeSource ?? true,
-          canBeTarget: system.canBeTarget ?? true,
-          colorCode: system.colorCode
-        })
-      });
-      
-      if (!response.ok) throw new Error("Failed to save system");
+  const { data: dataAreas = [] } = useQuery({
+    queryKey: ["/api/areas"],
+    queryFn: async () => {
+      const response = await fetch("/api/areas");
       return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sources"] });
-      setEditingSystem(null);
-      setIsAddingSystem(false);
-      toast({ title: "System saved successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to save system", variant: "destructive" });
-    }
-  });
-
-  // Delete system mutation
-  const deleteSystemMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const response = await fetch(`/api/sources/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete system");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sources"] });
-      toast({ title: "System deleted successfully" });
-    },
-    onError: () => {
-      toast({ title: "Failed to delete system", variant: "destructive" });
     }
   });
 
@@ -233,20 +135,78 @@ export default function ConfigurationPage() {
     }
   });
 
-  const handleSaveSystem = (system: SystemConfig) => {
-    saveSystemMutation.mutate(system);
-  };
-
-  const handleDeleteSystem = (id: number) => {
-    deleteSystemMutation.mutate(id);
-  };
-
   const handleSaveDomain = (domain: any) => {
     saveDomainMutation.mutate(domain);
   };
 
   const handleDeleteDomain = (id: number) => {
     deleteDomainMutation.mutate(id);
+  };
+
+  const saveAreaMutation = useMutation({
+    mutationFn: async (area: any) => {
+      const url = area.id ? `/api/areas/${area.id}` : "/api/areas";
+      const method = area.id ? "PATCH" : "POST";
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: area.name,
+          description: area.description,
+          colorCode: area.colorCode,
+          domainId: area.domainId
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: Failed to save data area`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
+      setIsAddingArea(false);
+      setEditingArea(null);
+      setSelectedDomainForArea(null);
+      toast({ title: "Data area saved successfully" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to save data area",
+        description: error?.message || "Unknown error occurred",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const deleteAreaMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/areas/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error("Failed to delete data area");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
+      toast({ title: "Data area deleted successfully" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to delete data area",
+        description: error?.message || "Unknown error occurred",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const handleSaveArea = (area: any) => {
+    saveAreaMutation.mutate(area);
+  };
+
+  const handleDeleteArea = (id: number) => {
+    deleteAreaMutation.mutate(id);
   };
 
   const handleSaveAiConfig = async (category: string, config: any) => {
@@ -349,7 +309,7 @@ export default function ConfigurationPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setLocation("/")}
+            onClick={() => setLocation("/modeler")}
             className="mr-2"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -371,68 +331,34 @@ export default function ConfigurationPage() {
         </TabsList>
 
         <TabsContent value="systems" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-xl font-semibold">Source & Target Systems</h2>
-            <Button onClick={() => setIsAddingSystem(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add System
-            </Button>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {dataSources.map((source: System) => (
-              <Card key={source.id} className="relative">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Database className="h-5 w-5 text-blue-600" />
-                      <CardTitle className="text-lg">{source.name}</CardTitle>
-                    </div>
-                    <div className="flex space-x-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingSystem({
-                          id: source.id,
-                          name: source.name,
-                          type: source.type ?? "sql",
-                          category: source.category || "",
-                          description: source.description || "",
-                          connectionString: source.connectionString || "",
-                          configuration: source.configuration || {},
-                          canBeSource: source.canBeSource ?? true,
-                          canBeTarget: source.canBeTarget ?? true,
-                          colorCode: source.colorCode ?? undefined
-                        })}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteSystem(source.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="w-fit">
-                    {source.type || "Unknown"}
-                  </Badge>
-                </CardHeader>
-                <CardContent>
-                  <CardDescription className="text-sm">
-                    {source.description || "No description available"}
-                  </CardDescription>
-                  {source.connectionString && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Connection: {source.connectionString.substring(0, 50)}...
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Dedicated systems workspace</CardTitle>
+              <CardDescription>
+                Manage system lifecycle, run connection health checks, and synchronize metadata from a purpose-built view.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                We moved system management to its own workspace with richer tooling for add/edit, connection testing, object syncing,
+                and domain assignments. Use the links below to open the workspace or fall back to the legacy form.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={() => setLocation("/systems")} className="flex items-center gap-2">
+                  <Server className="h-4 w-4" />
+                  Open systems workspace
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setLocation("/configuration/systems/new")}
+                  className="flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Quick add (legacy)
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="domains" className="space-y-4">
@@ -445,8 +371,11 @@ export default function ConfigurationPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {domains.map((domain: any) => (
-              <Card key={domain.id}>
+            {domains.map((domain: any) => {
+              const domainAreas = dataAreas.filter((area: any) => area.domainId === domain.id);
+
+              return (
+                <Card key={domain.id}>
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-2">
@@ -475,14 +404,73 @@ export default function ConfigurationPage() {
                   <CardDescription className="text-sm">
                     {domain.description || "No description available"}
                   </CardDescription>
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    <Badge variant="secondary" className="text-xs">
-                      {domain.id === 1 ? "HR" : domain.id === 2 ? "Finance" : domain.id === 3 ? "Operations" : domain.id === 4 ? "Sales" : "Technical"}
-                    </Badge>
+                  <div className="mt-4 space-y-3 border-t pt-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-muted-foreground">Data Areas</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setSelectedDomainForArea(domain);
+                          setEditingArea(null);
+                          setIsAddingArea(true);
+                        }}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Area
+                      </Button>
+                    </div>
+                    {domainAreas.length ? (
+                      <div className="space-y-2">
+                        {domainAreas.map((area: any) => (
+                          <div
+                            key={area.id}
+                            className="flex items-start justify-between rounded-md border border-dashed px-3 py-2"
+                            style={{ borderColor: area.colorCode || "#d1d5db" }}
+                          >
+                            <div className="pr-2">
+                              <p className="text-sm font-medium" style={{ color: area.colorCode || undefined }}>
+                                {area.name}
+                              </p>
+                              {area.description && (
+                                <p className="text-xs text-muted-foreground">{area.description}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setSelectedDomainForArea(domain);
+                                  setEditingArea(area);
+                                  setIsAddingArea(true);
+                                }}
+                                className="h-8 w-8"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteArea(area.id)}
+                                className="h-8 w-8"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm italic text-muted-foreground">
+                        No data areas yet. Add one to start organizing this domain.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
 
           <Card className="mt-6">
@@ -926,32 +914,48 @@ export default function ConfigurationPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Add/Edit System Dialog */}
-      <Dialog open={isAddingSystem || !!editingSystem} onOpenChange={(open) => {
-        if (!open) {
-          setIsAddingSystem(false);
-          setEditingSystem(null);
-        }
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingSystem ? "Edit System" : "Add New System"}
-            </DialogTitle>
-            <DialogDescription>
-              {editingSystem ? "Update the system configuration settings." : "Add a new system to your configuration."}
-            </DialogDescription>
-          </DialogHeader>
-          <SystemForm
-            system={editingSystem}
-            onSave={handleSaveSystem}
-            onCancel={() => {
-              setIsAddingSystem(false);
-              setEditingSystem(null);
-            }}
-          />
-        </DialogContent>
-      </Dialog>
+      {selectedDomainForArea && (
+        <Dialog
+          open={isAddingArea}
+          onOpenChange={(open) => {
+            if (!open) {
+              setIsAddingArea(false);
+              setEditingArea(null);
+              setSelectedDomainForArea(null);
+            }
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>
+                {editingArea ? "Edit Data Area" : `Add Data Area to ${selectedDomainForArea.name}`}
+              </DialogTitle>
+              <DialogDescription>
+                Maintain the functional breakdown within the {selectedDomainForArea.name} domain.
+              </DialogDescription>
+            </DialogHeader>
+            <AreaForm
+              key={editingArea?.id || "new"}
+              domain={selectedDomainForArea}
+              area={editingArea}
+              isSaving={saveAreaMutation.isPending}
+              onSave={(values) => {
+                if (!selectedDomainForArea) return;
+                handleSaveArea({
+                  ...values,
+                  domainId: selectedDomainForArea.id,
+                  id: editingArea?.id
+                });
+              }}
+              onCancel={() => {
+                setIsAddingArea(false);
+                setEditingArea(null);
+                setSelectedDomainForArea(null);
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Add/Edit Domain Dialog */}
       <Dialog open={isAddingDomain || !!editingDomain} onOpenChange={(open) => {
@@ -983,151 +987,105 @@ export default function ConfigurationPage() {
   );
 }
 
-function SystemForm({ 
-  system, 
-  onSave, 
-  onCancel 
-}: { 
-  system: SystemConfig | null;
-  onSave: (system: SystemConfig) => void;
+type AreaFormValues = {
+  name: string;
+  description?: string;
+  colorCode?: string;
+};
+
+function AreaForm({
+  domain,
+  area,
+  onSave,
+  onCancel,
+  isSaving
+}: {
+  domain: any;
+  area: any;
+  onSave: (values: AreaFormValues) => void;
   onCancel: () => void;
+  isSaving: boolean;
 }) {
-  const [formData, setFormData] = useState<SystemConfig>(
-    system || {
-      name: "",
-      type: "sql",
-      category: "",
-      description: "",
-      connectionString: "",
-      configuration: {},
-      canBeSource: true,
-      canBeTarget: true,
-      colorCode: "#6366f1"
-    }
-  );
+  const [formData, setFormData] = useState<AreaFormValues>({
+    name: area?.name || "",
+    description: area?.description || "",
+    colorCode: area?.colorCode || domain?.colorCode || "#10b981"
+  });
+
+  useEffect(() => {
+    setFormData({
+      name: area?.name || "",
+      description: area?.description || "",
+      colorCode: area?.colorCode || domain?.colorCode || "#10b981"
+    });
+  }, [area, domain]);
+
+  if (!domain) {
+    return null;
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.name || formData.name.trim() === "") {
+      alert("Data area name is required");
+      return;
+    }
+
     onSave(formData);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="name">System Name</Label>
-          <Input
-            id="name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
+      <div className="rounded-md bg-muted px-3 py-2 text-sm">
+        <span className="font-medium">Domain</span>
+        <div className="mt-1 flex items-center gap-2 text-sm">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: domain.colorCode || "#6366f1" }}
           />
-        </div>
-        <div>
-          <Label htmlFor="type">Connection Type</Label>
-          <Select value={formData.type} onValueChange={(value) => 
-            setFormData({ ...formData, type: value, category: "" })
-          }>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CONNECTION_TYPES.map((type) => (
-                <SelectItem key={type.value} value={type.value}>
-                  {type.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <span>{domain.name}</span>
         </div>
       </div>
 
       <div>
-        <Label htmlFor="category">Category</Label>
-        <Select value={formData.category} onValueChange={(value) => 
-          setFormData({ ...formData, category: value })
-        }>
-          <SelectTrigger>
-            <SelectValue placeholder="Select a category" />
-          </SelectTrigger>
-          <SelectContent>
-            {SYSTEM_CATEGORIES.map((category) => (
-              <SelectItem key={category} value={category}>
-                {category}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Label htmlFor="area-name">Area Name</Label>
+        <Input
+          id="area-name"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
       </div>
 
       <div>
-        <Label htmlFor="description">Description</Label>
+        <Label htmlFor="area-description">Description</Label>
         <Textarea
-          id="description"
+          id="area-description"
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-          placeholder="Describe this system's purpose and usage"
+          placeholder="Describe the scope of this data area"
         />
       </div>
 
       <div>
-        <Label htmlFor="connectionString">Connection String (Optional)</Label>
+        <Label htmlFor="area-color">Color Code</Label>
         <Input
-          id="connectionString"
-          value={formData.connectionString}
-          onChange={(e) => setFormData({ ...formData, connectionString: e.target.value })}
-          placeholder="Database connection string or API endpoint"
+          id="area-color"
+          type="color"
+          value={formData.colorCode}
+          onChange={(e) => setFormData({ ...formData, colorCode: e.target.value })}
         />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="canBeSource"
-            checked={formData.canBeSource ?? true}
-            onChange={(e) => setFormData({ ...formData, canBeSource: e.target.checked })}
-          />
-          <Label htmlFor="canBeSource">Can be Source System</Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="canBeTarget"
-            checked={formData.canBeTarget ?? true}
-            onChange={(e) => setFormData({ ...formData, canBeTarget: e.target.checked })}
-          />
-          <Label htmlFor="canBeTarget">Can be Target System</Label>
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="colorCode">Color Code</Label>
-        <div className="flex items-center space-x-2">
-          <Input
-            id="colorCode"
-            type="color"
-            value={formData.colorCode || "#6366f1"}
-            onChange={(e) => setFormData({ ...formData, colorCode: e.target.value })}
-            className="w-16 h-10 p-1 cursor-pointer"
-          />
-          <Input
-            value={formData.colorCode || "#6366f1"}
-            onChange={(e) => setFormData({ ...formData, colorCode: e.target.value })}
-            placeholder="#6366f1"
-            className="flex-1 font-mono text-sm"
-          />
-        </div>
       </div>
 
       <div className="flex justify-end space-x-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           <X className="h-4 w-4 mr-2" />
           Cancel
         </Button>
-        <Button type="submit">
+        <Button type="submit" disabled={isSaving}>
           <Save className="h-4 w-4 mr-2" />
-          Save System
+          {isSaving ? "Saving..." : area ? "Update Area" : "Save Area"}
         </Button>
       </div>
     </form>

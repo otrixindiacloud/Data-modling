@@ -1,8 +1,7 @@
-import React, { useState, useRef } from "react";
-import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Plus, Settings, Database, Layers3, Server, Palette } from "lucide-react";
+import React, { useState } from "react";
+import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Plus, Settings, Layers3, Server, Menu, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModelerStore } from "@/store/modelerStore";
-import { ModelLayer } from "@/types/modeler";
 import AddDataModelModal from "@/components/modals/AddDataModelModal";
 import ModelSelector from "@/components/ModelSelector";
 import LayerNavigator from "@/components/LayerNavigator";
@@ -11,17 +10,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useLocation } from "wouter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-const LAYERS: { key: ModelLayer; label: string }[] = [
-  { key: "conceptual", label: "Conceptual" },
-  { key: "logical", label: "Logical" },
-  { key: "physical", label: "Physical" },
-];
-
 export default function TopNavBar() {
   const {
     currentModel,
-    currentLayer,
-    setCurrentLayer,
     setShowExportModal,
     undo,
     redo,
@@ -32,16 +23,24 @@ export default function TopNavBar() {
   const [showAddModelModal, setShowAddModelModal] = useState(false);
   const [location, setLocation] = useLocation();
 
-  const handleLayerChange = (layer: ModelLayer) => {
-    setCurrentLayer(layer);
-  };
-
   const handleConfigurationClick = () => {
     setLocation("/configuration");
   };
 
-  const handleColorThemeClick = () => {
-    setLocation("/color-themes");
+  const handleSystemsClick = () => {
+    setLocation("/systems");
+  };
+
+  const handleModelsClick = () => {
+    setLocation("/models");
+  };
+
+  const handleReportsClick = () => {
+    setLocation("/reports");
+  };
+
+  const openNavigation = () => {
+    window.dispatchEvent(new CustomEvent("openNavigation"));
   };
 
   const handleZoomIn = () => {
@@ -61,8 +60,27 @@ export default function TopNavBar() {
       <header className="bg-card dark:bg-card border-b border-border dark:border-border flex items-center justify-between px-3 sm:px-4 lg:px-6 h-14 sm:h-16 shadow-soft relative z-50 min-w-0">
       <div className="flex items-center space-x-1 sm:space-x-2 lg:space-x-4 min-w-0 flex-1">
         {/* Mobile Navigation - integrated into responsive design */}
-        
         <div className="flex items-center space-x-2 min-w-0">
+          <div className="md:hidden">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={openNavigation}
+                  aria-label="Open navigation"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Open navigation</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
           {/* DArk Modeler Logo */}
           <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-700 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg ring-1 sm:ring-2 ring-white/20 dark:ring-white/10">
             <svg width="16" height="16" viewBox="0 0 32 32" fill="none" className="text-white sm:w-5 sm:h-5">
@@ -230,21 +248,41 @@ export default function TopNavBar() {
           </TooltipContent>
         </Tooltip>
 
-        {/* Color Theme Button */}
+        {/* Data Models List Button */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              onClick={handleColorThemeClick}
+              onClick={handleModelsClick}
               variant="outline"
               size="sm"
-              className="font-medium touch-target shadow-soft hover:shadow-medium transition-all duration-200 hover:bg-gradient-to-r hover:from-pink-50 hover:to-purple-50 dark:hover:from-pink-950 dark:hover:to-purple-950"
+              className="font-medium touch-target shadow-soft hover:shadow-medium transition-all duration-200"
             >
-              <Palette className="w-4 h-4 lg:mr-2" />
-              <span className="hidden lg:inline">Colors</span>
+              <Layers3 className="w-4 h-4 mr-1 lg:mr-2" />
+              <span className="hidden lg:inline">Models</span>
+              <span className="lg:hidden">List</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Open smart color theme designer</p>
+            <p>Go to data models list</p>
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Systems Management Button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              onClick={handleSystemsClick}
+              variant="outline"
+              size="sm"
+              className="font-medium touch-target shadow-soft hover:shadow-medium transition-all duration-200"
+            >
+              <Server className="w-4 h-4 mr-1 lg:mr-2" />
+              <span className="hidden lg:inline">Systems</span>
+              <span className="lg:hidden">Sys</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Manage systems and sync objects</p>
           </TooltipContent>
         </Tooltip>
 
@@ -263,6 +301,25 @@ export default function TopNavBar() {
           </TooltipTrigger>
           <TooltipContent>
             <p>System configuration and settings</p>
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Reports Button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              onClick={handleReportsClick}
+              variant="outline"
+              size="sm"
+              className="font-medium touch-target shadow-soft hover:shadow-medium transition-all duration-200 flex-shrink-0"
+            >
+              <BarChart3 className="w-4 h-4 mr-1 lg:mr-2" />
+              <span className="hidden sm:inline">Reports</span>
+              <span className="sm:hidden">Reports</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>View generated insights and reports</p>
           </TooltipContent>
         </Tooltip>
 

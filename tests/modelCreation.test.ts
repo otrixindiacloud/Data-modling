@@ -112,6 +112,8 @@ const storageMock = {
       layer: model.layer,
       parentModelId: model.parentModelId ?? null,
       targetSystemId: model.targetSystemId ?? null,
+      domainId: model.domainId ?? null,
+      dataAreaId: model.dataAreaId ?? null,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -120,6 +122,9 @@ const storageMock = {
   },
   async getDataDomains(): Promise<DataDomain[]> {
     return store.dataDomains;
+  },
+  async getDataDomain(id: number): Promise<DataDomain | undefined> {
+    return store.dataDomains.find((domain) => domain.id === id);
   },
   async getDataDomainByName(name: string): Promise<DataDomain | undefined> {
     return store.dataDomains.find((domain) => domain.name === name);
@@ -136,6 +141,9 @@ const storageMock = {
   },
   async getDataAreas(): Promise<DataArea[]> {
     return store.dataAreas;
+  },
+  async getDataAreasByDomain(domainId: number): Promise<DataArea[]> {
+    return store.dataAreas.filter((area) => area.domainId === domainId);
   },
   async getDataAreaByName(name: string, domainId?: number): Promise<DataArea | undefined> {
     return store.dataAreas.find((area) => area.name === name && (!domainId || area.domainId === domainId));
@@ -156,6 +164,12 @@ const storageMock = {
   },
   async getAllDataObjects(): Promise<DataObject[]> {
     return store.dataObjects;
+  },
+  async getDataObjectsBySourceSystem(systemId: number): Promise<DataObject[]> {
+    return store.dataObjects.filter((object) => object.sourceSystemId === systemId);
+  },
+  async getDataObjectsByTargetSystem(systemId: number): Promise<DataObject[]> {
+    return store.dataObjects.filter((object) => object.targetSystemId === systemId);
   },
   async getDataObject(id: number): Promise<DataObject | undefined> {
     return store.dataObjects.find((object) => object.id === id);
@@ -181,6 +195,28 @@ const storageMock = {
     store.dataObjects.push(newObject);
     return newObject;
   },
+  async updateDataObject(id: number, updates: Partial<InsertDataObject>): Promise<DataObject> {
+    const object = store.dataObjects.find((item) => item.id === id);
+    if (!object) {
+      throw new Error(`DataObject with id ${id} not found`);
+    }
+
+    Object.assign(object, {
+      ...updates,
+      metadata: updates.metadata ?? object.metadata,
+      position: updates.position ?? object.position,
+      commonProperties: updates.commonProperties ?? object.commonProperties
+    });
+
+    object.updatedAt = new Date();
+    return object;
+  },
+  async deleteDataObject(id: number): Promise<void> {
+    const index = store.dataObjects.findIndex((object) => object.id === id);
+    if (index !== -1) {
+      store.dataObjects.splice(index, 1);
+    }
+  },
   async createDataModelObject(object: InsertDataModelObject): Promise<DataModelObject> {
     const newModelObject: DataModelObject = {
       id: ++counters.dataModelObject,
@@ -199,6 +235,12 @@ const storageMock = {
   },
   async getDataModelObjects(): Promise<DataModelObject[]> {
     return store.dataModelObjects;
+  },
+  async getDataModelObjectsByModel(modelId: number): Promise<DataModelObject[]> {
+    return store.dataModelObjects.filter((modelObject) => modelObject.modelId === modelId);
+  },
+  async deleteDataModelObjectsByObject(objectId: number): Promise<void> {
+    store.dataModelObjects = store.dataModelObjects.filter((modelObject) => modelObject.objectId !== objectId);
   },
   async createAttribute(attribute: InsertAttribute): Promise<Attribute> {
     const newAttribute: Attribute = {
@@ -224,6 +266,12 @@ const storageMock = {
     };
     store.attributes.push(newAttribute);
     return newAttribute;
+  },
+  async getAttributesByObject(objectId: number): Promise<Attribute[]> {
+    return store.attributes.filter((attribute) => attribute.objectId === objectId);
+  },
+  async deleteAttributesByObject(objectId: number): Promise<void> {
+    store.attributes = store.attributes.filter((attribute) => attribute.objectId !== objectId);
   }
 };
 
@@ -238,7 +286,7 @@ app.use(express.urlencoded({ extended: false }));
 let registerRoutes: typeof import("../server/routes").registerRoutes;
 let server: import("http").Server;
 
-describe("/api/models/create-with-layers", () => {
+describe("Data model creation APIs", () => {
   beforeAll(async () => {
     process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-key";
     ({ registerRoutes } = await import("../server/routes"));
@@ -259,6 +307,87 @@ describe("/api/models/create-with-layers", () => {
       type: "adls",
       description: "Test target system"
     } satisfies InsertSystem);
+  });
+
+  it("creates a conceptual model via /api/models", async () => {
+    const response = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Standalone Conceptual Model",
+        layer: "conceptual",
+        targetSystemId: 1
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const model = response.body as DataModel;
+    expect(model.name).toBe("Standalone Conceptual Model");
+    expect(model.layer).toBe("conceptual");
+    expect(model.parentModelId).toBeNull();
+    expect(store.dataModels).toHaveLength(1);
+  });
+
+  it("creates a logical model linked to a conceptual parent", async () => {
+    const conceptualResponse = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Composite Model",
+        layer: "conceptual"
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const conceptualModel = conceptualResponse.body as DataModel;
+
+    const logicalResponse = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Composite Model",
+        layer: "logical",
+        parentModelId: conceptualModel.id
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const logicalModel = logicalResponse.body as DataModel;
+    expect(logicalModel.layer).toBe("logical");
+    expect(logicalModel.parentModelId).toBe(conceptualModel.id);
+    expect(store.dataModels).toHaveLength(2);
+  });
+
+  it("creates a physical model linked to the same conceptual parent", async () => {
+    const conceptualResponse = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Deployment Model",
+        layer: "conceptual",
+        targetSystemId: 1
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const conceptualModel = conceptualResponse.body as DataModel;
+
+    const logicalResponse = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Deployment Model",
+        layer: "logical",
+        parentModelId: conceptualModel.id
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const physicalResponse = await request(app)
+      .post("/api/models")
+      .send({
+        name: "Deployment Model",
+        layer: "physical",
+        parentModelId: conceptualModel.id
+      } satisfies InsertDataModel)
+      .expect(201);
+
+    const logicalModel = logicalResponse.body as DataModel;
+    const physicalModel = physicalResponse.body as DataModel;
+
+    expect(logicalModel.parentModelId).toBe(conceptualModel.id);
+    expect(physicalModel.parentModelId).toBe(conceptualModel.id);
+    expect(store.dataModels).toHaveLength(3);
   });
 
   it("creates conceptual, logical, and physical models with mapped objects", async () => {

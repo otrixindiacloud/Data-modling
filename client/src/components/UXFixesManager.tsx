@@ -43,7 +43,7 @@ export default function UXFixesManager() {
       queryClient.removeQueries({ queryKey: ["/api/objects"] });
       queryClient.removeQueries({ queryKey: ["/api/attributes"] });
       queryClient.removeQueries({ queryKey: ["/api/domains"] });
-      queryClient.removeQueries({ queryKey: ["/api/data-areas"] });
+  queryClient.removeQueries({ queryKey: ["/api/areas"] });
       queryClient.removeQueries({ queryKey: ["/api/systems"] });
       
       // Force immediate refetch with fresh data

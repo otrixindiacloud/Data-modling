@@ -26,20 +26,6 @@ if (usePostgreSQL) {
 
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
   db = drizzle({ client: pool, schema });
-} else {
-  // Use SQLite for local development when no DATABASE_URL is provided
-  const sqlite = new Database('./dev.db');
-  sqlite.pragma('foreign_keys = ON');
-  db = drizzleSQLite(sqlite, { schema });
-
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const migrationsFolder = path.resolve(__dirname, "../migrations");
-    migrate(db, { migrationsFolder });
-  } catch (migrationError) {
-    console.error("Failed to run SQLite migrations:", migrationError);
-  }
 }
 
 export { db, pool };

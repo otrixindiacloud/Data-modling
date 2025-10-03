@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,6 +24,8 @@ interface AttributeRelationshipModalProps {
     name: string;
     attributes: any[];
   };
+  initialSourceAttributeId?: number;
+  initialTargetAttributeId?: number;
 }
 
 export default function AttributeRelationshipModal({
@@ -31,11 +33,20 @@ export default function AttributeRelationshipModal({
   onClose,
   onConfirm,
   sourceNode,
-  targetNode
+  targetNode,
+  initialSourceAttributeId,
+  initialTargetAttributeId
 }: AttributeRelationshipModalProps) {
   const [sourceAttributeId, setSourceAttributeId] = useState<number | null>(null);
   const [targetAttributeId, setTargetAttributeId] = useState<number | null>(null);
   const [relationshipType, setRelationshipType] = useState<"1:1" | "1:N" | "N:M">("1:1");
+
+  useEffect(() => {
+    if (isOpen) {
+      setSourceAttributeId(initialSourceAttributeId ?? null);
+      setTargetAttributeId(initialTargetAttributeId ?? null);
+    }
+  }, [isOpen, initialSourceAttributeId, initialTargetAttributeId]);
 
   const handleConfirm = () => {
     if (sourceAttributeId && targetAttributeId) {
@@ -94,7 +105,10 @@ export default function AttributeRelationshipModal({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="source-attribute">Source Attribute</Label>
-              <Select onValueChange={(value) => setSourceAttributeId(parseInt(value))}>
+              <Select
+                value={sourceAttributeId !== null ? sourceAttributeId.toString() : undefined}
+                onValueChange={(value) => setSourceAttributeId(parseInt(value))}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select source attribute" />
                 </SelectTrigger>
@@ -117,7 +131,10 @@ export default function AttributeRelationshipModal({
 
             <div className="space-y-2">
               <Label htmlFor="target-attribute">Target Attribute</Label>
-              <Select onValueChange={(value) => setTargetAttributeId(parseInt(value))}>
+              <Select
+                value={targetAttributeId !== null ? targetAttributeId.toString() : undefined}
+                onValueChange={(value) => setTargetAttributeId(parseInt(value))}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select target attribute" />
                 </SelectTrigger>

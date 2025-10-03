@@ -1,10 +1,12 @@
 export interface DatabaseConnectionConfig {
-  type: "sap_hana" | "oracle" | "sql_server";
+  type: "sap_hana" | "oracle" | "sql_server" | "postgres" | "mysql" | "generic_sql";
   host: string;
   port: number;
   database: string;
   username: string;
   password: string;
+  schema?: string;
+  sslMode?: string;
 }
 
 export interface ADLSConnectionConfig {
@@ -18,6 +20,8 @@ export interface ADLSConnectionConfig {
 
 export interface TableMetadata {
   name: string;
+  schema?: string;
+  originalName?: string;
   columns: ColumnMetadata[];
   rowCount?: number;
 }
@@ -52,35 +56,237 @@ export class DataConnectors {
 
   // Extract metadata from database
   async extractDatabaseMetadata(config: DatabaseConnectionConfig): Promise<TableMetadata[]> {
-    // In a real implementation, this would connect to the actual database
-    // For now, we'll return sample metadata based on the database type
-    
-    const sampleTables: TableMetadata[] = [
-      {
-        name: "EMPLOYEES",
-        columns: [
-          { name: "EMPLOYEE_ID", type: "VARCHAR", nullable: false, isPrimaryKey: true, length: 36 },
-          { name: "FIRST_NAME", type: "VARCHAR", nullable: false, isPrimaryKey: false, length: 100 },
-          { name: "LAST_NAME", type: "VARCHAR", nullable: false, isPrimaryKey: false, length: 100 },
-          { name: "EMAIL", type: "VARCHAR", nullable: true, isPrimaryKey: false, length: 255 },
-          { name: "DEPARTMENT_ID", type: "INTEGER", nullable: true, isPrimaryKey: false },
-          { name: "HIRE_DATE", type: "DATE", nullable: false, isPrimaryKey: false },
-        ],
-        rowCount: 1245
-      },
-      {
-        name: "DEPARTMENTS",
-        columns: [
-          { name: "DEPARTMENT_ID", type: "INTEGER", nullable: false, isPrimaryKey: true },
-          { name: "DEPARTMENT_NAME", type: "VARCHAR", nullable: false, isPrimaryKey: false, length: 100 },
-          { name: "MANAGER_ID", type: "VARCHAR", nullable: true, isPrimaryKey: false, length: 36 },
-          { name: "BUDGET", type: "DECIMAL", nullable: true, isPrimaryKey: false },
-        ],
-        rowCount: 15
-      }
-    ];
+    // This implementation uses node-postgres for Postgres, mysql2 for MySQL, and mssql for SQL Server.
+    // For Oracle and SAP HANA, you would need to install oracledb and @sap/hana-client respectively.
+    // Only Postgres and MySQL are implemented here for demonstration.
 
-    return sampleTables;
+    if (config.type === "postgres") {
+      // PostgreSQL
+      const { Client } = await import("pg");
+      const sslMode = config.sslMode?.toLowerCase();
+      const shouldUseSsl = sslMode && sslMode !== "disable";
+      const client = new Client({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.username,
+        password: config.password,
+        ssl: shouldUseSsl ? { rejectUnauthorized: false } : undefined,
+      });
+
+      const quoteIdentifier = (identifier: string) => `"${identifier.replace(/"/g, '""')}"`;
+
+      try {
+        await client.connect();
+
+        const tablesQuery = config.schema
+        ? {
+            text: `SELECT table_schema, table_name
+                   FROM information_schema.tables
+                   WHERE table_type = 'BASE TABLE' AND table_schema = $1
+                   ORDER BY table_name`,
+            values: [config.schema],
+          }
+        : {
+            text: `SELECT table_schema, table_name
+                   FROM information_schema.tables
+                   WHERE table_type = 'BASE TABLE'
+                     AND table_schema NOT IN ('pg_catalog', 'information_schema')
+                   ORDER BY table_schema, table_name`,
+            values: [] as unknown[],
+          };
+
+        const tablesRes = await client.query(tablesQuery.text, tablesQuery.values);
+
+        const tables: TableMetadata[] = [];
+        for (const row of tablesRes.rows) {
+        const schemaName = row.table_schema as string;
+        const tableName = row.table_name as string;
+
+        const columnsRes = await client.query(
+          `SELECT column_name, data_type, is_nullable, character_maximum_length
+           FROM information_schema.columns
+           WHERE table_schema = $1 AND table_name = $2
+           ORDER BY ordinal_position`,
+          [schemaName, tableName]
+        );
+
+        const pkRes = await client.query(
+          `SELECT a.attname as column_name
+           FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+           WHERE i.indisprimary AND n.nspname = $1 AND c.relname = $2`,
+          [schemaName, tableName]
+        );
+
+        const pkCols = pkRes.rows.map((r: any) => r.column_name);
+
+        let rowCount: number | undefined;
+        const qualifiedName = `${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}`;
+        try {
+          const countRes = await client.query(`SELECT COUNT(*) FROM ${qualifiedName}`);
+          const rawCount = countRes.rows?.[0]?.count as string | undefined;
+          rowCount = rawCount ? Number.parseInt(rawCount, 10) : undefined;
+        } catch (error) {
+          console.warn(`Failed to count rows for ${schemaName}.${tableName}:`, error);
+        }
+
+        const columns: ColumnMetadata[] = columnsRes.rows.map((col: any) => ({
+          name: col.column_name,
+          type: (col.data_type as string).toUpperCase(),
+          nullable: col.is_nullable === "YES",
+          isPrimaryKey: pkCols.includes(col.column_name),
+          length: col.character_maximum_length ? Number(col.character_maximum_length) : undefined,
+        }));
+
+        const displayName = schemaName && schemaName !== "public"
+          ? `${schemaName}.${tableName}`
+          : tableName;
+
+          tables.push({
+            name: displayName,
+            schema: schemaName,
+            originalName: tableName,
+            columns,
+            rowCount,
+          });
+        }
+
+        return tables;
+      } finally {
+        try {
+          await client.end();
+        } catch (error) {
+          console.warn("Failed to close PostgreSQL client", error);
+        }
+      }
+    }
+
+    if (config.type === "mysql") {
+      // MySQL
+      const mysql = await import('mysql2/promise');
+      const connection = await mysql.createConnection({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.username,
+        password: config.password,
+      });
+
+      // Get tables
+      const [tablesRows] = await connection.query(
+        `SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'`,
+        [config.database]
+      );
+
+      const tables: TableMetadata[] = [];
+      for (const row of tablesRows as any[]) {
+        const tableName = row.TABLE_NAME;
+
+        // Get columns
+        const [columnsRows] = await connection.query(
+          `SELECT column_name, data_type, is_nullable, character_maximum_length, column_key
+           FROM information_schema.columns
+           WHERE table_schema = ? AND table_name = ?`,
+          [config.database, tableName]
+        );
+
+        // Get row count
+        let rowCount: number | undefined = undefined;
+        try {
+          const [countRows] = await connection.query(`SELECT COUNT(*) as cnt FROM \`${tableName}\``);
+          rowCount = (countRows as any[])[0].cnt;
+        } catch {}
+
+        const columns: ColumnMetadata[] = (columnsRows as any[]).map(col => ({
+          name: col.COLUMN_NAME,
+          type: col.DATA_TYPE.toUpperCase(),
+          nullable: col.IS_NULLABLE === 'YES',
+          isPrimaryKey: col.COLUMN_KEY === 'PRI',
+          length: col.CHARACTER_MAXIMUM_LENGTH ? Number(col.CHARACTER_MAXIMUM_LENGTH) : undefined,
+        }));
+
+        tables.push({
+          name: tableName,
+          columns,
+          rowCount,
+        });
+      }
+
+      await connection.end();
+      return tables;
+    }
+
+    if (config.type === "sql_server") {
+      // SQL Server
+      const mssql = await import('mssql');
+      const pool = await mssql.connect({
+        server: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.username,
+        password: config.password,
+        options: { encrypt: false }
+      });
+
+      const tablesRes = await pool.request().query(`
+        SELECT TABLE_NAME
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE = 'BASE TABLE'
+      `);
+
+      const tables: TableMetadata[] = [];
+      for (const row of tablesRes.recordset) {
+        const tableName = row.TABLE_NAME;
+
+        // Get columns
+        const columnsRes = await pool.request().query(`
+          SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME = @tableName
+        `).input('tableName', mssql.VarChar, tableName);
+
+        // Get primary keys
+        const pkRes = await pool.request().query(`
+          SELECT COLUMN_NAME
+          FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+          WHERE OBJECTPROPERTY(OBJECT_ID(CONSTRAINT_SCHEMA + '.' + CONSTRAINT_NAME), 'IsPrimaryKey') = 1
+            AND TABLE_NAME = @tableName
+        `).input('tableName', mssql.VarChar, tableName);
+
+        const pkCols = pkRes.recordset.map((r: any) => r.COLUMN_NAME);
+
+        // Get row count
+        let rowCount: number | undefined = undefined;
+        try {
+          const countRes = await pool.request().query(`SELECT COUNT(*) as cnt FROM [${tableName}]`);
+          rowCount = countRes.recordset[0].cnt;
+        } catch {}
+
+        const columns: ColumnMetadata[] = columnsRes.recordset.map((col: any) => ({
+          name: col.COLUMN_NAME,
+          type: col.DATA_TYPE.toUpperCase(),
+          nullable: col.IS_NULLABLE === 'YES',
+          isPrimaryKey: pkCols.includes(col.COLUMN_NAME),
+          length: col.CHARACTER_MAXIMUM_LENGTH ? Number(col.CHARACTER_MAXIMUM_LENGTH) : undefined,
+        }));
+
+        tables.push({
+          name: tableName,
+          columns,
+          rowCount,
+        });
+      }
+
+      await pool.close();
+      return tables;
+    }
+
+    // For Oracle, SAP HANA, and generic_sql, you would need to implement similar logic using their respective drivers.
+    // For now, throw an error for unsupported types.
+    throw new Error(`Database type "${config.type}" is not supported in this implementation.`);
   }
 
   // Parse CSV file

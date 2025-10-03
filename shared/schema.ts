@@ -10,6 +10,8 @@ export const dataModels = pgTable("data_models", {
   layer: text("layer").notNull(), // "conceptual" | "logical" | "physical"
   parentModelId: integer("parent_model_id"), // Links layers together
   targetSystemId: integer("target_system_id").references(() => systems.id), // Reference to target system
+  domainId: integer("domain_id").references(() => dataDomains.id),
+  dataAreaId: integer("data_area_id").references(() => dataAreas.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -219,6 +221,14 @@ export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
     references: [systems.id],
     relationName: "targetSystem"
   }),
+  domain: one(dataDomains, {
+    fields: [dataModels.domainId],
+    references: [dataDomains.id],
+  }),
+  dataArea: one(dataAreas, {
+    fields: [dataModels.dataAreaId],
+    references: [dataAreas.id],
+  }),
   parentModel: one(dataModels, {
     fields: [dataModels.parentModelId],
     references: [dataModels.id],
@@ -231,6 +241,7 @@ export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
 
 export const dataDomainsRelations = relations(dataDomains, ({ many }) => ({
   dataAreas: many(dataAreas),
+  dataModels: many(dataModels),
   dataObjects: many(dataObjects),
 }));
 
@@ -239,6 +250,7 @@ export const dataAreasRelations = relations(dataAreas, ({ one, many }) => ({
     fields: [dataAreas.domainId],
     references: [dataDomains.id],
   }),
+  dataModels: many(dataModels),
   dataObjects: many(dataObjects),
 }));
 

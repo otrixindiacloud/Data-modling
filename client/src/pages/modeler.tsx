@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useModelerStore } from "@/store/modelerStore";
 import TopNavBar from "@/components/TopNavBar";
-import ImprovedCollapsibleDataExplorer from "@/components/ImprovedCollapsibleDataExplorer";
+import DataObjectExplorer from "@/components/DataObjectExplorer";
 import Canvas from "@/components/Canvas";
 import EnhancedPropertiesPanel from "@/components/EnhancedPropertiesPanel";
 import UXFixesManager from "@/components/UXFixesManager";
@@ -13,20 +13,30 @@ import { Button } from "@/components/ui/button";
 import { Settings, Menu, Database, ChevronRight } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { usePanelWidths } from "@/hooks/usePanelWidths";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import ImprovedModelPicker from "@/components/ImprovedModelPicker";
+import { Badge } from "@/components/ui/badge";
+import { useRoute } from "wouter";
+import type { DataModel } from "@shared/schema";
 
 export default function ModelerPage() {
-  const { 
-    setDomains, 
-    setDataSources, 
-    currentModel, 
-    setCurrentModel, 
-    currentLayer, 
-    setCurrentLayer 
+  const {
+    setDomains,
+    setDataAreas,
+    setDataSources,
+    setAllModels,
+    currentModel,
+    setCurrentModel,
+    currentLayer,
+    setCurrentLayer
   } = useModelerStore();
+  const [matchModelRoute, routeParams] = useRoute<{ modelId: string }>("/modeler/:modelId");
   const [showMobileProperties, setShowMobileProperties] = useState(false);
   const [showMobileDataSources, setShowMobileDataSources] = useState(false);
   const [dataExplorerCollapsed, setDataExplorerCollapsed] = useState(false);
   const { widths, updateWidths } = usePanelWidths();
+  const [showModelRequiredModal, setShowModelRequiredModal] = useState(false);
+  const [modelRequiredMessage, setModelRequiredMessage] = useState<string | null>(null);
 
   // Load domains
   const { data: domains } = useQuery({
@@ -38,10 +48,58 @@ export default function ModelerPage() {
     queryKey: ["/api/sources"],
   });
 
+  // Load data areas
+  const { data: dataAreas } = useQuery({
+    queryKey: ["/api/areas"],
+    queryFn: async () => {
+      const response = await fetch("/api/areas");
+      if (!response.ok) {
+        throw new Error("Failed to load data areas");
+      }
+      const areas = await response.json();
+      return Array.isArray(areas) ? areas : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Load models and set the first one as current if none selected
   const { data: models } = useQuery({
     queryKey: ["/api/models"],
   });
+
+  const conceptualModels = useMemo(() => {
+    if (!Array.isArray(models)) return [];
+    return models.filter((model: any) =>
+      model.layer === "conceptual" &&
+      (model.parentModelId === null || model.parentModelId === undefined)
+    );
+  }, [models]);
+
+  useEffect(() => {
+    if (!matchModelRoute || !routeParams?.modelId || !Array.isArray(models) || models.length === 0) {
+      return;
+    }
+
+    const decodedParam = decodeURIComponent(routeParams.modelId);
+    const numericId = Number(decodedParam);
+    const typedModels = models as DataModel[];
+
+    let targetModel: DataModel | undefined;
+
+    if (!Number.isNaN(numericId)) {
+      targetModel = typedModels.find((model) => model.id === numericId);
+    }
+
+    if (!targetModel) {
+      targetModel = typedModels.find(
+        (model) => model.name.toLowerCase() === decodedParam.toLowerCase()
+      );
+    }
+
+    if (targetModel && (!currentModel || currentModel.id !== targetModel.id)) {
+      setCurrentModel(targetModel);
+    }
+  }, [matchModelRoute, routeParams, models, currentModel, setCurrentModel]);
 
   useEffect(() => {
     if (domains && Array.isArray(domains)) {
@@ -56,19 +114,41 @@ export default function ModelerPage() {
   }, [dataSources, setDataSources]);
 
   useEffect(() => {
-    if (models && Array.isArray(models) && models.length > 0 && !currentModel) {
+    if (models && Array.isArray(models) && models.length > 0) {
+      setAllModels(models);
+
       // Find the first conceptual model (parent model) to set as current
-      const conceptualModels = models.filter((model: any) => 
-        model.layer === "conceptual" && (model.parentModelId === null || model.parentModelId === undefined)
-      );
-      
-      if (conceptualModels.length > 0) {
-        setCurrentModel(conceptualModels[0]);
-      } else {
-        setCurrentModel(models[0]);
+      if (!currentModel) {
+        if (conceptualModels.length > 0) {
+          setCurrentModel(conceptualModels[0]);
+        }
       }
     }
-  }, [models, currentModel, setCurrentModel]);
+  }, [models, conceptualModels, currentModel, setCurrentModel, setAllModels]);
+
+  useEffect(() => {
+    if (dataAreas && Array.isArray(dataAreas)) {
+      setDataAreas(dataAreas);
+    }
+  }, [dataAreas, setDataAreas]);
+
+  useEffect(() => {
+    if (Array.isArray(models) && models.length > 0) {
+      setShowModelRequiredModal(!currentModel);
+    }
+  }, [models, currentModel]);
+
+  useEffect(() => {
+    const handleModelRequired = (event: CustomEvent) => {
+      setModelRequiredMessage(event.detail?.message ?? null);
+      setShowModelRequiredModal(true);
+    };
+
+    window.addEventListener("modelRequired", handleModelRequired as EventListener);
+    return () => {
+      window.removeEventListener("modelRequired", handleModelRequired as EventListener);
+    };
+  }, []);
 
   // Listen for double-click events to open properties panel
   useEffect(() => {
@@ -98,11 +178,48 @@ export default function ModelerPage() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
+    <div className="flex flex-1 flex-col overflow-hidden bg-background min-h-0">
       <TopNavBar />
       
       
       <div className="flex-1 min-h-0 relative">
+  <Dialog open={showModelRequiredModal} onOpenChange={setShowModelRequiredModal} modal>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Select a model to get started</DialogTitle>
+              <DialogDescription>
+                {modelRequiredMessage || "Choose a conceptual model to unlock canvas editing. You can switch layers later."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Available models
+                </p>
+                {conceptualModels.length === 0 ? (
+                  <div className="rounded-md border bg-muted/10 p-4 text-sm text-muted-foreground">
+                    No conceptual models found. Create one from the top bar.
+                  </div>
+                ) : (
+                  <ImprovedModelPicker
+                    compact={false}
+                    onCreateNew={() => window.dispatchEvent(new CustomEvent("openAddModelModal"))}
+                  />
+                )}
+              </div>
+              <div className="rounded-md border bg-muted/10 p-4 text-xs text-muted-foreground">
+                <p className="font-medium flex items-center gap-2 text-sm">
+                  <Badge variant="secondary">Why required?</Badge>
+                  Layers share a conceptual parent and depend on it for context.
+                </p>
+                <p className="mt-2">
+                  Selecting a conceptual model ensures objects are saved to the correct logical and physical layers.
+                </p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* Desktop layout with resizable panels - xl screens (3 panels) */}
         <div className="hidden xl:flex h-full">
           <PanelGroup direction="horizontal" onLayout={(sizes) => {
@@ -119,7 +236,7 @@ export default function ModelerPage() {
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
             >
-              <ImprovedCollapsibleDataExplorer 
+              <DataObjectExplorer 
                 isCollapsed={dataExplorerCollapsed}
                 onToggleCollapse={handleToggleDataExplorer}
               />
@@ -169,7 +286,7 @@ export default function ModelerPage() {
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
             >
-              <ImprovedCollapsibleDataExplorer 
+              <DataObjectExplorer 
                 isCollapsed={dataExplorerCollapsed}
                 onToggleCollapse={handleToggleDataExplorer}
               />
@@ -214,7 +331,7 @@ export default function ModelerPage() {
                     <SheetTitle className="text-left">Data Sources</SheetTitle>
                   </SheetHeader>
                   <div className="h-full overflow-y-auto">
-                    <ImprovedCollapsibleDataExplorer 
+                    <DataObjectExplorer 
                       isCollapsed={false}
                       onToggleCollapse={() => {}}
                       onClose={() => setShowMobileDataSources(false)}

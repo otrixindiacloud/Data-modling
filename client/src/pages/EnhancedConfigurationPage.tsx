@@ -295,7 +295,7 @@ export default function EnhancedConfigurationPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setLocation("/")}
+            onClick={() => setLocation("/modeler")}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Modeler

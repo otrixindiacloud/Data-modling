@@ -2,15 +2,15 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { 
-  CheckCircle, 
-  XCircle, 
-  AlertTriangle, 
+import {
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
   Activity,
-  Database,
-  Zap,
   Settings,
-  TrendingUp
+  Layers,
+  Database,
+  Server
 } from "lucide-react";
 import { configManager } from "@/lib/configManager";
 
@@ -23,20 +23,34 @@ interface ConfigStatus {
 }
 
 interface SystemMetrics {
-  performance: {
-    responseTime: number;
-    memoryUsage: number;
-    uptime: number;
-  };
+  generatedAt: string;
   configuration: {
     totalConfigs: number;
     modifiedToday: number;
-    errors: number;
+    lastUpdated: string | null;
+    categories: Array<{
+      name: string;
+      count: number;
+      missingKeys: string[];
+    }>;
+    missingKeys: string[];
   };
-  ai: {
-    requestsToday: number;
-    averageConfidence: number;
-    successRate: number;
+  models: {
+    total: number;
+    conceptual: number;
+    logical: number;
+    physical: number;
+  };
+  objects: {
+    total: number;
+    attributes: number;
+    relationships: number;
+  };
+  systems: {
+    total: number;
+    connected: number;
+    disconnected: number;
+    error: number;
   };
 }
 
@@ -44,6 +58,36 @@ export default function ConfigurationStatus() {
   const [statuses, setStatuses] = useState<ConfigStatus[]>([]);
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const statusCounts = React.useMemo(
+    () =>
+      statuses.reduce(
+        (acc, status) => {
+          if (status.status === "error") {
+            acc.errors += 1;
+          } else if (status.status === "warning") {
+            acc.warnings += 1;
+          } else {
+            acc.healthy += 1;
+          }
+          return acc;
+        },
+        { healthy: 0, warnings: 0, errors: 0 }
+      ),
+    [statuses]
+  );
+
+  const missingKeyCount = metrics?.configuration.missingKeys.length ?? 0;
+
+  const healthScore = React.useMemo(() => {
+    const base = 100 - statusCounts.errors * 25 - statusCounts.warnings * 10 - missingKeyCount * 5;
+    return Math.max(0, Math.min(100, base));
+  }, [missingKeyCount, statusCounts.errors, statusCounts.warnings]);
+
+  const lastMetricsRefresh = React.useMemo(() => {
+    if (!metrics) return null;
+    return new Date(metrics.generatedAt);
+  }, [metrics]);
 
   useEffect(() => {
     loadConfigurationStatus();
@@ -154,28 +198,16 @@ export default function ConfigurationStatus() {
 
   const loadSystemMetrics = async () => {
     try {
-      // Simulate system metrics - in a real app, these would come from monitoring APIs
-      const mockMetrics: SystemMetrics = {
-        performance: {
-          responseTime: Math.floor(Math.random() * 100) + 50, // 50-150ms
-          memoryUsage: Math.floor(Math.random() * 30) + 40, // 40-70%
-          uptime: Date.now() - (Math.random() * 86400000) // Random uptime within 24 hours
-        },
-        configuration: {
-          totalConfigs: statuses.reduce((acc, s) => acc + Object.keys(s.details || {}).length, 0),
-          modifiedToday: Math.floor(Math.random() * 5),
-          errors: Math.floor(Math.random() * 2)
-        },
-        ai: {
-          requestsToday: Math.floor(Math.random() * 50) + 10,
-          averageConfidence: 0.7 + Math.random() * 0.2, // 0.7-0.9
-          successRate: 0.85 + Math.random() * 0.1 // 85-95%
-        }
-      };
+      const response = await fetch("/api/system-metrics");
+      if (!response.ok) {
+        throw new Error("Failed to load system metrics");
+      }
 
-      setMetrics(mockMetrics);
+      const data: SystemMetrics = await response.json();
+      setMetrics(data);
     } catch (error) {
       console.error("Failed to load system metrics:", error);
+      setMetrics(null);
     }
   };
 
@@ -205,12 +237,6 @@ export default function ConfigurationStatus() {
     }
   };
 
-  const formatUptime = (ms: number) => {
-    const hours = Math.floor(ms / (1000 * 60 * 60));
-    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m`;
-  };
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -235,17 +261,75 @@ export default function ConfigurationStatus() {
     <div className="space-y-6">
       {/* System Metrics Overview */}
       {metrics && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center">
-                <Activity className="h-4 w-4 mr-2 text-blue-600" />
-                Response Time
+                <Settings className="h-4 w-4 mr-2 text-blue-600" />
+                Configuration Entries
               </CardTitle>
+              <CardDescription className="text-xs">
+                {metrics.configuration.lastUpdated
+                  ? `Last updated ${new Date(metrics.configuration.lastUpdated).toLocaleString()}`
+                  : "No updates recorded yet"}
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{metrics.performance.responseTime}ms</div>
-              <p className="text-xs text-muted-foreground">Average API response</p>
+              <div className="text-2xl font-bold">{metrics.configuration.totalConfigs}</div>
+              <p className="text-xs text-muted-foreground">
+                {metrics.configuration.modifiedToday} updated today
+              </p>
+              {metrics.configuration.categories.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {metrics.configuration.categories.slice(0, 3).map((category) => (
+                    <div
+                      key={category.name}
+                      className="flex justify-between text-xs text-muted-foreground"
+                    >
+                      <span className="capitalize">{category.name}</span>
+                      <span>{category.count}</span>
+                    </div>
+                  ))}
+                  {metrics.configuration.categories.length > 3 && (
+                    <div className="text-xs text-muted-foreground">
+                      +{metrics.configuration.categories.length - 3} more categories
+                    </div>
+                  )}
+                </div>
+              )}
+              {metrics.configuration.missingKeys.length > 0 ? (
+                <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  <p className="font-medium">Missing required keys</p>
+                  <ul className="mt-2 space-y-1 list-disc list-inside">
+                    {metrics.configuration.missingKeys.slice(0, 4).map((key) => (
+                      <li key={key}>{key}</li>
+                    ))}
+                  </ul>
+                  {metrics.configuration.missingKeys.length > 4 && (
+                    <p className="mt-1">+{metrics.configuration.missingKeys.length - 4} more</p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-green-600">All required keys are configured.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center">
+                <Layers className="h-4 w-4 mr-2 text-indigo-600" />
+                Data Models
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Layer distribution across the workspace
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{metrics.models.total}</div>
+              <p className="text-xs text-muted-foreground">
+                Conceptual: {metrics.models.conceptual} · Logical: {metrics.models.logical} · Physical: {metrics.models.physical}
+              </p>
             </CardContent>
           </Card>
 
@@ -253,38 +337,35 @@ export default function ConfigurationStatus() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center">
                 <Database className="h-4 w-4 mr-2 text-green-600" />
-                Memory Usage
+                Data Objects
               </CardTitle>
+              <CardDescription className="text-xs">
+                Entities, attributes, and relationships
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{metrics.performance.memoryUsage}%</div>
-              <p className="text-xs text-muted-foreground">System memory utilization</p>
+              <div className="text-2xl font-bold">{metrics.objects.total}</div>
+              <p className="text-xs text-muted-foreground">
+                {metrics.objects.attributes} attributes · {metrics.objects.relationships} relationships
+              </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center">
-                <Zap className="h-4 w-4 mr-2 text-purple-600" />
-                AI Requests
+                <Server className="h-4 w-4 mr-2 text-orange-600" />
+                Systems
               </CardTitle>
+              <CardDescription className="text-xs">
+                Connection status across integrations
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{metrics.ai.requestsToday}</div>
-              <p className="text-xs text-muted-foreground">Today ({(metrics.ai.successRate * 100).toFixed(1)}% success)</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center">
-                <TrendingUp className="h-4 w-4 mr-2 text-orange-600" />
-                Uptime
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatUptime(metrics.performance.uptime)}</div>
-              <p className="text-xs text-muted-foreground">System availability</p>
+              <div className="text-2xl font-bold">{metrics.systems.total}</div>
+              <p className="text-xs text-muted-foreground">
+                Connected: {metrics.systems.connected} · Disconnected: {metrics.systems.disconnected} · Errors: {metrics.systems.error}
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -346,47 +427,100 @@ export default function ConfigurationStatus() {
       {metrics && (
         <Card>
           <CardHeader>
-            <CardTitle>Configuration Health Score</CardTitle>
-            <CardDescription>Overall system configuration assessment</CardDescription>
+            <CardTitle>Configuration Health</CardTitle>
+            <CardDescription>
+              Status overview based on configuration completeness and system readiness
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Overall Health</span>
+                <span className="text-sm font-medium">Overall Health Score</span>
                 <div className="flex items-center space-x-2">
-                  <div className="w-24 bg-muted rounded-full h-2">
-                    <div 
-                      className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.max(85, 100 - metrics.configuration.errors * 10)}%` }}
+                  <div className="w-32 bg-muted rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        healthScore >= 80
+                          ? "bg-green-600"
+                          : healthScore >= 60
+                          ? "bg-yellow-500"
+                          : "bg-red-500"
+                      }`}
+                      style={{ width: `${healthScore}%` }}
                     />
                   </div>
-                  <span className="text-sm font-bold text-green-600">
-                    {Math.max(85, 100 - metrics.configuration.errors * 10)}%
+                  <span
+                    className={`text-sm font-bold ${
+                      healthScore >= 80
+                        ? "text-green-600"
+                        : healthScore >= 60
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {healthScore}%
                   </span>
                 </div>
               </div>
-              
-              <div className="grid gap-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Total Configurations:</span>
-                  <span className="font-medium">{metrics.configuration.totalConfigs}</span>
+
+              <div className="grid gap-3 text-sm md:grid-cols-2">
+                <div className="flex items-start justify-between rounded border bg-muted/30 p-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Status Breakdown</p>
+                    <p className="text-sm font-medium">
+                      {statusCounts.healthy} healthy · {statusCounts.warnings} warnings · {statusCounts.errors} errors
+                    </p>
+                  </div>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <div className="flex justify-between">
-                  <span>Modified Today:</span>
-                  <span className="font-medium">{metrics.configuration.modifiedToday}</span>
+
+                <div className="flex items-start justify-between rounded border bg-muted/30 p-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Required Configuration Keys</p>
+                    <p className="text-sm font-medium">
+                      {missingKeyCount} missing · {metrics.configuration.totalConfigs} total
+                    </p>
+                  </div>
+                  <Settings className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <div className="flex justify-between">
-                  <span>Configuration Errors:</span>
-                  <span className={`font-medium ${metrics.configuration.errors > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {metrics.configuration.errors}
-                  </span>
+
+                <div className="flex items-start justify-between rounded border bg-muted/30 p-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Tracked Entities</p>
+                    <p className="text-sm font-medium">
+                      {metrics.objects.total} objects · {metrics.objects.attributes} attributes
+                    </p>
+                  </div>
+                  <Database className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <div className="flex justify-between">
-                  <span>AI Confidence:</span>
-                  <span className="font-medium text-blue-600">
-                    {(metrics.ai.averageConfidence * 100).toFixed(1)}%
-                  </span>
+
+                <div className="flex items-start justify-between rounded border bg-muted/30 p-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Systems Health</p>
+                    <p className="text-sm font-medium">
+                      {metrics.systems.connected} connected · {metrics.systems.error} with errors
+                    </p>
+                  </div>
+                  <Server className="h-4 w-4 text-muted-foreground" />
                 </div>
+              </div>
+
+              <div className="rounded border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between">
+                  <span>Metrics generated</span>
+                  <span>{lastMetricsRefresh?.toLocaleString() ?? "Unknown"}</span>
+                </div>
+                {lastMetricsRefresh && (
+                  <div className="mt-1">
+                    <span>Relative time: </span>
+                    <span>
+                      {new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(
+                        Math.round((lastMetricsRefresh.getTime() - Date.now()) / 1000),
+                        "second"
+                      )}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>

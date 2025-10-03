@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Select,
@@ -22,16 +22,29 @@ export default function ModelSelector() {
     model.layer === "conceptual" && (model.parentModelId === null || model.parentModelId === undefined)
   );
 
-  // Get all models for the current model family (conceptual + its logical/physical layers)
-  const modelFamily = (allModels as DataModel[] || []).filter((model: DataModel) => 
-    model.parentModelId === currentModel?.id || model.id === currentModel?.id
-  );
+  const selectedConceptualId = useMemo(() => {
+    if (!currentModel) {
+      return "";
+    }
+
+    if (currentModel.layer === "conceptual") {
+      return currentModel.id.toString();
+    }
+
+    if (currentModel.parentModelId) {
+      return currentModel.parentModelId.toString();
+    }
+
+    const fallback = conceptualModels.find((model: DataModel) => model.id === currentModel.id);
+    return fallback ? fallback.id.toString() : "";
+  }, [currentModel, conceptualModels]);
 
   const handleModelChange = (modelId: string) => {
     const model = conceptualModels?.find((m: DataModel) => m.id === parseInt(modelId));
     if (model) {
+      const nextLayer = currentLayer;
       setCurrentModel(model);
-      setCurrentLayer("conceptual"); // Always start with conceptual when switching models
+      setCurrentLayer(nextLayer);
     }
   };
 
@@ -55,7 +68,7 @@ export default function ModelSelector() {
     <div className="flex items-center space-x-2">
       <span className="text-sm font-medium">Model:</span>
       <Select
-        value={currentModel?.id.toString() || ""}
+        value={selectedConceptualId}
         onValueChange={handleModelChange}
       >
         <SelectTrigger className="w-64">

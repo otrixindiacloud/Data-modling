@@ -8,6 +8,7 @@ export interface CanvasNode {
   type: string;
   position: Position;
   data: {
+    modelObjectId?: number;
     objectId: number;
     name: string;
     domain?: string;
@@ -55,6 +56,8 @@ export interface DataSourceConnection {
 
 export interface TableMetadata {
   name: string;
+  schema?: string;
+  originalName?: string;
   columns: ColumnMetadata[];
   rowCount?: number;
 }

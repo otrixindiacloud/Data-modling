@@ -204,6 +204,19 @@ export async function seedDatabase() {
       }
     ]).returning();
 
+    const [treasuryOperationsArea, tradeFinanceArea] = await db.insert(dataAreas).values([
+      {
+        name: "Treasury Operations",
+        domainId: financeDomain.id,
+        description: "Cash positioning, liquidity, and treasury contracts"
+      },
+      {
+        name: "Trade Finance",
+        domainId: financeDomain.id,
+        description: "Letters of credit and guarantees"
+      }
+    ]).returning();
+
     // Seed Data Models
     const [hrModel, manufacturingModel, sapManufacturingModel] = await db.insert(dataModels).values([
       {
@@ -218,6 +231,14 @@ export async function seedDatabase() {
       },
       {
         name: "SAP Manufacturing Integration Model",
+        layer: "conceptual",
+        targetSystemId: dataWarehouseSystem.id
+      }
+    ]).returning();
+
+    const [treasuryManagementModel] = await db.insert(dataModels).values([
+      {
+        name: "Treasury Management Model",
         layer: "conceptual",
         targetSystemId: dataWarehouseSystem.id
       }
@@ -435,6 +456,59 @@ export async function seedDatabase() {
         targetSystemId: dataWarehouseSystem.id,
         isNew: true,
         position: { x: 1000, y: 100 }
+      }
+    ]).returning();
+
+    const [treasuryContractObj, treasuryLoanObj, treasuryDepositObj, letterOfCreditObj, letterOfGuaranteeObj] = await db.insert(dataObjects).values([
+      {
+        name: "Treasury_Contract",
+        modelId: treasuryManagementModel.id,
+        domainId: financeDomain.id,
+        dataAreaId: treasuryOperationsArea.id,
+        sourceSystemId: sapSystem.id,
+        targetSystemId: dataWarehouseSystem.id,
+        isNew: false,
+        position: { x: 150, y: 160 }
+      },
+      {
+        name: "Treasury_Loan",
+        modelId: treasuryManagementModel.id,
+        domainId: financeDomain.id,
+        dataAreaId: treasuryOperationsArea.id,
+        sourceSystemId: sapSystem.id,
+        targetSystemId: dataWarehouseSystem.id,
+        isNew: true,
+        position: { x: 420, y: 160 }
+      },
+      {
+        name: "Treasury_Deposit",
+        modelId: treasuryManagementModel.id,
+        domainId: financeDomain.id,
+        dataAreaId: treasuryOperationsArea.id,
+        sourceSystemId: sapSystem.id,
+        targetSystemId: dataWarehouseSystem.id,
+        isNew: true,
+        position: { x: 690, y: 160 }
+      },
+      {
+        name: "Letter_of_Credit",
+        modelId: treasuryManagementModel.id,
+        domainId: financeDomain.id,
+        dataAreaId: tradeFinanceArea.id,
+        sourceSystemId: sapSystem.id,
+        targetSystemId: dataWarehouseSystem.id,
+        isNew: false,
+        position: { x: 300, y: 400 }
+      },
+      {
+        name: "Letter_of_Guarantee",
+        modelId: treasuryManagementModel.id,
+        domainId: financeDomain.id,
+        dataAreaId: tradeFinanceArea.id,
+        sourceSystemId: sapSystem.id,
+        targetSystemId: dataWarehouseSystem.id,
+        isNew: false,
+        position: { x: 580, y: 400 }
       }
     ]).returning();
 
@@ -1455,6 +1529,319 @@ export async function seedDatabase() {
       }
     ]);
 
+    await db.insert(attributes).values([
+      // Treasury Contract attributes
+      {
+        name: "contract_id",
+        dataType: "INTEGER",
+        isPrimaryKey: true,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "contract_number",
+        dataType: "VARCHAR(30)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "contract_type",
+        dataType: "VARCHAR(40)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "counterparty",
+        dataType: "VARCHAR(100)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "effective_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "maturity_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: false,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "currency",
+        dataType: "VARCHAR(3)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "notional_amount",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      {
+        name: "status",
+        dataType: "VARCHAR(20)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryContractObj.id
+      },
+      // Treasury Loan attributes
+      {
+        name: "loan_id",
+        dataType: "INTEGER",
+        isPrimaryKey: true,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "contract_id",
+        dataType: "INTEGER",
+        isPrimaryKey: false,
+        isRequired: true,
+        isForeignKey: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "loan_type",
+        dataType: "VARCHAR(40)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "principal_amount",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "interest_rate",
+        dataType: "DECIMAL(5,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "start_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "end_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: false,
+        objectId: treasuryLoanObj.id
+      },
+      {
+        name: "current_balance",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryLoanObj.id
+      },
+      // Treasury Deposit attributes
+      {
+        name: "deposit_id",
+        dataType: "INTEGER",
+        isPrimaryKey: true,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "contract_id",
+        dataType: "INTEGER",
+        isPrimaryKey: false,
+        isRequired: true,
+        isForeignKey: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "deposit_type",
+        dataType: "VARCHAR(40)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "amount",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "interest_rate",
+        dataType: "DECIMAL(5,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "start_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "maturity_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: false,
+        objectId: treasuryDepositObj.id
+      },
+      {
+        name: "status",
+        dataType: "VARCHAR(20)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: treasuryDepositObj.id
+      },
+      // Letter of Credit attributes
+      {
+        name: "lc_id",
+        dataType: "INTEGER",
+        isPrimaryKey: true,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "contract_id",
+        dataType: "INTEGER",
+        isPrimaryKey: false,
+        isRequired: true,
+        isForeignKey: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "applicant",
+        dataType: "VARCHAR(100)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "beneficiary",
+        dataType: "VARCHAR(100)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "issue_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "expiry_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: false,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "currency",
+        dataType: "VARCHAR(3)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "amount",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      {
+        name: "status",
+        dataType: "VARCHAR(20)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfCreditObj.id
+      },
+      // Letter of Guarantee attributes
+      {
+        name: "lg_id",
+        dataType: "INTEGER",
+        isPrimaryKey: true,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "contract_id",
+        dataType: "INTEGER",
+        isPrimaryKey: false,
+        isRequired: true,
+        isForeignKey: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "applicant",
+        dataType: "VARCHAR(100)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "beneficiary",
+        dataType: "VARCHAR(100)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "issue_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "expiry_date",
+        dataType: "DATE",
+        isPrimaryKey: false,
+        isRequired: false,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "currency",
+        dataType: "VARCHAR(3)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "amount",
+        dataType: "DECIMAL(18,2)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      },
+      {
+        name: "status",
+        dataType: "VARCHAR(20)",
+        isPrimaryKey: false,
+        isRequired: true,
+        objectId: letterOfGuaranteeObj.id
+      }
+    ]);
+
     // Seed Relationships
     await db.insert(relationships).values([
       {
@@ -1609,6 +1996,41 @@ export async function seedDatabase() {
         sourceAttributeName: "superior_equipment",
         targetAttributeName: "equipment_number",
         modelId: sapManufacturingModel.id
+      }
+    ]);
+
+    await db.insert(relationships).values([
+      {
+        sourceObjectId: treasuryLoanObj.id,
+        targetObjectId: treasuryContractObj.id,
+        type: "N:1",
+        sourceAttributeName: "contract_id",
+        targetAttributeName: "contract_id",
+        modelId: treasuryManagementModel.id
+      },
+      {
+        sourceObjectId: treasuryDepositObj.id,
+        targetObjectId: treasuryContractObj.id,
+        type: "N:1",
+        sourceAttributeName: "contract_id",
+        targetAttributeName: "contract_id",
+        modelId: treasuryManagementModel.id
+      },
+      {
+        sourceObjectId: letterOfCreditObj.id,
+        targetObjectId: treasuryContractObj.id,
+        type: "N:1",
+        sourceAttributeName: "contract_id",
+        targetAttributeName: "contract_id",
+        modelId: treasuryManagementModel.id
+      },
+      {
+        sourceObjectId: letterOfGuaranteeObj.id,
+        targetObjectId: treasuryContractObj.id,
+        type: "N:1",
+        sourceAttributeName: "contract_id",
+        targetAttributeName: "contract_id",
+        modelId: treasuryManagementModel.id
       }
     ]);
 

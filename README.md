@@ -71,9 +71,9 @@ A comprehensive data modeling application that provides a visual interface for c
    ```
 
 3. **Environment Configuration**
-   Create a `.env` file in the root directory:
+   Create a `.env` file in the root directory referencing your Neon connection string:
    ```env
-   DATABASE_URL=postgresql://username:password@localhost:5432/dark_modeler
+   DATABASE_URL=postgresql://<user>:<password>@<neon-host>/<database>?sslmode=require
    PORT=5000
    NODE_ENV=development
    ```
@@ -89,6 +89,13 @@ A comprehensive data modeling application that provides a visual interface for c
    # Optional: Open database studio
    npm run db:studio
    ```
+
+### Provisioning Neon PostgreSQL
+
+1. **Create a Neon project** – Sign in at [console.neon.tech](https://console.neon.tech), create a project, and choose the default branch/database.
+2. **Copy the connection string** – From the project dashboard, grab the `psql` connection string with `sslmode=require` and place it in your `.env` as `DATABASE_URL`.
+3. **Run migrations** – With the `.env` in place, run `npm run db:migrate` (or `npm run db:push`) to sync the schema to Neon.
+4. **Keep secrets local** – Commit an `.env.example` with placeholders, but never commit your real `DATABASE_URL`.
 
 5. **Start the application**
    ```bash

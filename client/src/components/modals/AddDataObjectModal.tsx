@@ -270,7 +270,7 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
       queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/attributes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/domains"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/data-areas"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "canvas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "objects"] });
       

@@ -46,6 +46,7 @@ export interface IStorage {
 
   // Data Domains
   getDataDomains(): Promise<DataDomain[]>;
+  getDataDomain(id: number): Promise<DataDomain | undefined>;
   getDataDomainByName(name: string): Promise<DataDomain | undefined>;
   createDataDomain(domain: InsertDataDomain): Promise<DataDomain>;
   updateDataDomain(id: number, domain: Partial<InsertDataDomain>): Promise<DataDomain>;
@@ -65,6 +66,8 @@ export interface IStorage {
   getAllDataObjects(): Promise<DataObject[]>;
   getDataObject(id: number): Promise<DataObject | undefined>;
   getDataObjectsByModel(modelId: number): Promise<DataObject[]>;
+  getDataObjectsBySourceSystem(systemId: number): Promise<DataObject[]>;
+  getDataObjectsByTargetSystem(systemId: number): Promise<DataObject[]>;
   createDataObject(object: InsertDataObject): Promise<DataObject>;
   updateDataObject(id: number, object: Partial<InsertDataObject>): Promise<DataObject>;
   deleteDataObject(id: number): Promise<void>;
@@ -72,6 +75,7 @@ export interface IStorage {
 
   // Data Model Objects
   getDataModelObjects(): Promise<DataModelObject[]>;
+  getDataModelObjectsByModel(modelId: number): Promise<DataModelObject[]>;
   getDataModelObject(id: number): Promise<DataModelObject | undefined>;
   createDataModelObject(object: InsertDataModelObject): Promise<DataModelObject>;
   updateDataModelObject(id: number, object: Partial<InsertDataModelObject>): Promise<DataModelObject>;
@@ -147,6 +151,11 @@ export class Storage implements IStorage {
   // Data Domains
   async getDataDomains(): Promise<DataDomain[]> {
     return await db.select().from(dataDomains);
+  }
+
+  async getDataDomain(id: number): Promise<DataDomain | undefined> {
+    const result = await db.select().from(dataDomains).where(eq(dataDomains.id, id));
+    return result[0];
   }
 
   async getDataDomainByName(name: string): Promise<DataDomain | undefined> {
@@ -254,9 +263,21 @@ export class Storage implements IStorage {
     return result;
   }
 
+  async getDataObjectsBySourceSystem(systemId: number): Promise<DataObject[]> {
+    return await db.select().from(dataObjects).where(eq(dataObjects.sourceSystemId, systemId));
+  }
+
+  async getDataObjectsByTargetSystem(systemId: number): Promise<DataObject[]> {
+    return await db.select().from(dataObjects).where(eq(dataObjects.targetSystemId, systemId));
+  }
+
   // Data Model Objects
   async getDataModelObjects(): Promise<DataModelObject[]> {
     return await db.select().from(dataModelObjects);
+  }
+
+  async getDataModelObjectsByModel(modelId: number): Promise<DataModelObject[]> {
+    return await db.select().from(dataModelObjects).where(eq(dataModelObjects.modelId, modelId));
   }
 
   async getDataModelObject(id: number): Promise<DataModelObject | undefined> {

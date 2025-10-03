@@ -15,10 +15,110 @@ interface HistoryEntry {
   edges: CanvasEdge[];
 }
 
+const findRootModel = (model: DataModel | null, models: DataModel[]): DataModel | null => {
+  if (!model) return null;
+
+  let current: DataModel | null = model;
+  const visited = new Set<number>();
+
+  while (current?.parentModelId) {
+    if (visited.has(current.parentModelId)) {
+      break;
+    }
+
+    visited.add(current.parentModelId);
+    const parent = models.find((m) => m.id === current?.parentModelId) ?? null;
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return current ?? model;
+};
+
+const getModelFamily = (root: DataModel | null, models: DataModel[]): DataModel[] => {
+  if (!root) return [];
+
+  const family: DataModel[] = [];
+  const visited = new Set<number>();
+  const queue: DataModel[] = [root];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current.id)) continue;
+
+    visited.add(current.id);
+    family.push(current);
+
+    const children = models.filter((model) => model.parentModelId === current.id);
+    queue.push(...children);
+  }
+
+  return family;
+};
+
+const buildModelMap = (models: DataModel[]): Map<number, DataModel> => {
+  return models.reduce((map, model) => {
+    map.set(model.id, model);
+    return map;
+  }, new Map<number, DataModel>());
+};
+
+const resolveLayerModel = (
+  layer: ModelLayer,
+  currentModel: DataModel | null,
+  family: DataModel[],
+  modelMap: Map<number, DataModel>
+): DataModel | null => {
+  const candidates = family.filter((model) => model.layer === layer);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (currentModel) {
+    const currentLineage = new Set<number>();
+    let lineageNode: DataModel | null | undefined = currentModel;
+
+    while (lineageNode) {
+      if (currentLineage.has(lineageNode.id)) {
+        break;
+      }
+
+      currentLineage.add(lineageNode.id);
+      if (!lineageNode.parentModelId) {
+        break;
+      }
+      lineageNode = modelMap.get(lineageNode.parentModelId) ?? null;
+    }
+
+    const branchMatch = candidates.find((candidate) => {
+      let pointer: DataModel | null | undefined = candidate;
+      while (pointer) {
+        if (currentLineage.has(pointer.id)) {
+          return true;
+        }
+        if (!pointer.parentModelId) {
+          break;
+        }
+        pointer = modelMap.get(pointer.parentModelId) ?? null;
+      }
+      return false;
+    });
+
+    if (branchMatch) {
+      return branchMatch;
+    }
+  }
+
+  return candidates[0];
+};
+
 interface ModelerState {
   // Current model
   currentModel: DataModel | null;
   currentLayer: ModelLayer;
+  allModels: DataModel[];
   
   // Canvas state
   nodes: CanvasNode[];
@@ -46,6 +146,8 @@ interface ModelerState {
   setCurrentModel: (model: DataModel | null) => void;
   setCurrentLayer: (layer: ModelLayer) => void;
   getCurrentLayerModel: () => DataModel | null;
+  setAllModels: (models: DataModel[]) => void;
+  requireModelBeforeAction: (message?: string) => boolean;
   
   // Canvas actions
   setNodes: (nodes: CanvasNode[]) => void;
@@ -87,6 +189,7 @@ export const useModelerStore = create<ModelerState>()(
     // Initial state
     currentModel: null,
     currentLayer: "conceptual",
+  allModels: [],
     nodes: [],
     edges: [],
     selectedNodeId: null,
@@ -103,20 +206,87 @@ export const useModelerStore = create<ModelerState>()(
     historyIndex: -1,
 
     // Model actions
-    setCurrentModel: (model) => set({ currentModel: model }),
-    setCurrentLayer: (layer) => set({ currentLayer: layer }),
+    setCurrentModel: (model) =>
+      set((state) => {
+        if (!model) {
+          return { currentModel: null };
+        }
+
+        const models = state.allModels || [];
+        if (models.length === 0) {
+          return {
+            currentModel: model,
+            currentLayer: (model.layer as ModelLayer | undefined) ?? state.currentLayer,
+          };
+        }
+
+        const modelMap = buildModelMap(models);
+        const rootModel = findRootModel(model, models) ?? model;
+        const family = getModelFamily(rootModel, models);
+
+        const preferredLayer = state.currentLayer;
+        const preferredModel = resolveLayerModel(preferredLayer, model, family, modelMap);
+
+        if (preferredModel) {
+          return {
+            currentModel: preferredModel,
+            currentLayer: preferredModel.layer as ModelLayer,
+          };
+        }
+
+        return {
+          currentModel: model,
+          currentLayer: (model.layer as ModelLayer | undefined) ?? state.currentLayer,
+        };
+      }),
+    setCurrentLayer: (layer) =>
+      set((state) => {
+        const models = state.allModels || [];
+        const modelMap = buildModelMap(models);
+        const rootModel = findRootModel(state.currentModel, models) ?? state.currentModel;
+        const family = getModelFamily(rootModel, models);
+        const targetModel = resolveLayerModel(layer, state.currentModel, family, modelMap) ?? rootModel ?? state.currentModel;
+        const resolvedLayer = (targetModel?.layer as ModelLayer | undefined) ?? layer;
+
+        return {
+          currentLayer: resolvedLayer,
+          currentModel: targetModel ?? null,
+        };
+      }),
+    setAllModels: (models) => {
+      if (typeof window !== "undefined") {
+        (window as any).__allModels = models;
+      }
+      set({ allModels: models });
+    },
+    requireModelBeforeAction: (message = "Select a data model to continue") => {
+      const state = get();
+      if (!state.currentModel) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("modelRequired", {
+              detail: { message },
+            })
+          );
+        }
+        return false;
+      }
+      return true;
+    },
     getCurrentLayerModel: () => {
       const state = get();
       if (!state.currentModel) return null;
-      
-      // If current model is conceptual and we want conceptual layer, return it
-      if (state.currentModel.layer === "conceptual" && state.currentLayer === "conceptual") {
-        return state.currentModel;
-      }
-      
-      // For logical/physical layers, we need to find the corresponding model
-      // This would require access to all models, which we'll handle in the component
-      return state.currentModel;
+
+      const models = state.allModels || [];
+      const modelMap = buildModelMap(models);
+      const rootModel = findRootModel(state.currentModel, models) ?? state.currentModel;
+      const familyModels = getModelFamily(rootModel, models);
+
+      return (
+        resolveLayerModel(state.currentLayer, state.currentModel, familyModels, modelMap) ??
+        rootModel ??
+        state.currentModel
+      );
     },
 
     // Canvas actions

@@ -42,6 +42,7 @@ import LayerNavigator from "./LayerNavigator";
 import SearchFilterPanel from "./Canvas/SearchFilterPanel";
 import AutoLayoutManager from "./Canvas/AutoLayoutManager";
 import { updateDynamicColors } from "@/utils/colorUtils";
+import type { ModelLayer } from "@/types/modeler";
 
 // Define nodeTypes outside component to avoid recreation warning
 const nodeTypes: NodeTypes = {
@@ -65,11 +66,15 @@ function CanvasComponent() {
   saveToHistory,
   currentModel,
   setCurrentModel,
-    currentLayer,
-    history,
-    undo,
-    redo,
-    clearHistory
+  allModels,
+  setAllModels,
+  requireModelBeforeAction,
+  currentLayer,
+  getCurrentLayerModel: storeGetCurrentLayerModel,
+  history,
+  undo,
+  redo,
+  clearHistory
   } = useModelerStore();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -103,6 +108,8 @@ function CanvasComponent() {
     targetNode: any;
     sourceHandle?: string;
     targetHandle?: string;
+    sourceAttributeId?: number;
+    targetAttributeId?: number;
   } | null>(null);
   
   // New state for editing existing relationships
@@ -147,40 +154,47 @@ function CanvasComponent() {
     }
   });
 
+  type SavePositionsPayload = {
+    positions: {
+      modelObjectId?: number;
+      objectId?: number;
+      position: { x: number; y: number };
+    }[];
+    modelId: number;
+    layer: ModelLayer;
+  };
+
   // Mutation for saving node positions with enhanced error handling
   const savePositionsMutation = useMutation({
-    mutationFn: async (positions: { objectId: number, position: { x: number, y: number } }[]) => {
-      const targetModelId = currentLayerModel?.id || currentModel?.id;
-      if (!targetModelId) throw new Error("No current model");
-      
+    mutationFn: async ({ positions, modelId, layer }: SavePositionsPayload) => {
       setSaveStatus('saving');
-      
-      const response = await fetch(`/api/models/${targetModelId}/canvas/positions`, {
+
+      const response = await fetch(`/api/models/${modelId}/canvas/positions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           positions,
-          layer: currentLayer 
+          layer,
         }),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to save positions: ${response.status} ${errorText}`);
       }
-      
+
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       setSaveStatus('saved');
       // Clear saved status after 2 seconds
       setTimeout(() => setSaveStatus('idle'), 2000);
-      
+
       // Invalidate and refetch canvas data to ensure consistency
       queryClient.invalidateQueries({
-        queryKey: ["/api/models", currentLayerModel?.id, "canvas", currentLayer]
+        queryKey: ["/api/models", variables.modelId, "canvas", variables.layer]
       });
     },
     onError: (error) => {
@@ -232,9 +246,15 @@ function CanvasComponent() {
   // nodeTypes are defined outside component to avoid recreation warning
 
   // Get all models to find the correct layer model
-  const { data: allModels } = useQuery({
+  const { data: allModelsQuery } = useQuery({
     queryKey: ["/api/models"],
   });
+
+  useEffect(() => {
+    if (Array.isArray(allModelsQuery)) {
+      setAllModels(allModelsQuery as DataModel[]);
+    }
+  }, [allModelsQuery, setAllModels]);
 
   useEffect(() => {
     if (!currentModel && Array.isArray(allModels) && allModels.length > 0) {
@@ -260,33 +280,20 @@ function CanvasComponent() {
     queryKey: ["/api/areas"],
   });
 
-  // Find the specific model for current layer
-  const getCurrentLayerModel = () => {
-    if (!currentModel || !allModels) return null;
-    
-    // If current model is already the correct layer, return it
-    if (currentModel.layer === currentLayer) {
+  const currentLayerModel = useMemo(() => {
+    if (!storeGetCurrentLayerModel) {
       return currentModel;
     }
-    
-    // Find the model family (conceptual + logical + physical)
-    const modelFamily = (allModels as any[]).filter((model: any) => 
-      model.parentModelId === currentModel.id || model.id === currentModel.id
-    );
-    
-    // Find the specific layer model
-    const layerModel = modelFamily.find((m: any) => m.layer === currentLayer);
-    
-    if (layerModel) {
-      return layerModel;
-    }
-    
-    // Fallback to current model if layer model not found
-    console.warn(`Layer model for ${currentLayer} not found, using current model`);
-    return currentModel;
-  };
 
-  const currentLayerModel = getCurrentLayerModel();
+    const resolved = storeGetCurrentLayerModel();
+
+    if (!resolved && currentModel) {
+      console.warn(`Layer model for ${currentLayer} not found, using current model`);
+      return currentModel;
+    }
+
+    return resolved;
+  }, [storeGetCurrentLayerModel, currentModel, currentLayer, allModels]);
 
   // Load canvas data when model or layer changes
   const { data: canvasData, isLoading } = useQuery({
@@ -414,34 +421,18 @@ function CanvasComponent() {
           }
 
           // Ensure we have a current model selected
-          if (!currentModel) {
+          if (!requireModelBeforeAction("Select a data model before adding objects to the canvas.")) {
             console.error('No current model selected when trying to add object:', object.name);
-            toast({
-              title: "No Active Model Selected",
-              description: "Please select a data model before adding objects to the canvas.",
-              variant: "destructive"
-            });
             return;
           }
 
           // Check if we have a valid layer model
-          if (!currentLayerModel) {
-            console.error('No current layer model found:', {
+          if (!currentLayerModel && currentModel) {
+            console.warn('No current layer model found, falling back to current model:', {
               currentModel: currentModel?.id,
               currentLayer,
               objectName: object.name
             });
-            // Try to use the current model as fallback
-            if (currentModel) {
-              console.log('Using current model as fallback:', currentModel.id);
-            } else {
-              toast({
-                title: "Model Layer Not Found",
-                description: `The current model doesn't have a ${currentLayer} layer. Please check your model configuration.`,
-                variant: "destructive"
-              });
-              return;
-            }
           }
 
           console.log('✓ Node added to canvas via touchDrop:', newNode.id);
@@ -543,11 +534,8 @@ function CanvasComponent() {
             });
           } else {
             console.error('No current model to add object to');
-            toast({
-              title: "No Active Model",
-              description: "Please select a model before adding objects.",
-              variant: "destructive"
-            });
+            requireModelBeforeAction("Select a data model before adding objects to the canvas.");
+            return;
           }
         } else if (type === 'data-area' && reactFlowWrapper.current) {
           const { area, objects } = dropData;
@@ -596,6 +584,11 @@ function CanvasComponent() {
               description: `All objects from "${area.name}" are already on the canvas.`,
               variant: "destructive"
             });
+            return;
+          }
+
+          if (!requireModelBeforeAction("Select a data model before adding objects to the canvas.")) {
+            console.error('No current model selected when trying to add data area:', area?.name);
             return;
           }
 
@@ -660,11 +653,8 @@ function CanvasComponent() {
             console.error('No current model to add objects to');
             const failedNodeIds = newNodes.map((n: any) => n.id);
             setNodes((nds) => nds.filter((n: any) => !failedNodeIds.includes(n.id)));
-            toast({
-              title: "No Active Model",
-              description: "Please select a model before adding objects.",
-              variant: "destructive"
-            });
+            requireModelBeforeAction("Select a data model before adding objects to the canvas.");
+            return;
           }
         }
       } catch (error) {
@@ -681,7 +671,7 @@ function CanvasComponent() {
         reactFlowWrapper.current.removeEventListener('touchDrop', handleTouchDrop as EventListener);
       }
     };
-  }, [nodes, currentLayerModel, currentModel, currentLayer, setNodes, screenToFlowPosition, queryClient, saveToHistory, toast]);
+  }, [nodes, currentLayerModel, currentModel, currentLayer, setNodes, screenToFlowPosition, queryClient, saveToHistory, toast, requireModelBeforeAction]);
 
   // Handle gesture events
   useEffect(() => {
@@ -737,38 +727,75 @@ function CanvasComponent() {
       // Debounce position saving to avoid excessive API calls
       savePositionsTimeoutRef.current = setTimeout(() => {
         setNodes(currentNodes => {
-          // Filter out nodes without objectId and ensure data integrity
-          const validNodes = currentNodes.filter(node => 
-            node.data && 
-            typeof node.data.objectId === 'number' && 
-            node.data.objectId > 0 &&
-            node.position &&
-            typeof node.position.x === 'number' &&
-            typeof node.position.y === 'number' &&
-            !isNaN(node.position.x) &&
-            !isNaN(node.position.y)
-          );
+          // Filter out nodes without identifiers and ensure data integrity
+          const validNodes = currentNodes.filter(node => {
+            const data = node.data || {};
+            const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
+            const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
+            const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
+
+            return (
+              hasIdentifier &&
+              node.position &&
+              typeof node.position.x === 'number' &&
+              typeof node.position.y === 'number' &&
+              !isNaN(node.position.x) &&
+              !isNaN(node.position.y)
+            );
+          });
           
           if (validNodes.length === 0) return currentNodes;
           
-          const positions = validNodes.map(node => ({
-            objectId: node.data.objectId,
-            position: {
-              x: Math.round(node.position.x * 100) / 100, // Round to 2 decimal places
-              y: Math.round(node.position.y * 100) / 100
+          const positions = validNodes.map(node => {
+            const data = node.data || {};
+            const payload: {
+              modelObjectId?: number;
+              objectId?: number;
+              position: { x: number; y: number };
+            } = {
+              position: {
+                x: Math.round(node.position.x * 100) / 100, // Round to 2 decimal places
+                y: Math.round(node.position.y * 100) / 100
+              }
+            };
+
+            if (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) {
+              payload.modelObjectId = data.modelObjectId;
             }
-          }));
+
+            if (typeof data.objectId === 'number' && data.objectId > 0) {
+              payload.objectId = data.objectId;
+            }
+
+            return payload;
+          });
           
+          const targetModelId = currentLayerModel?.id || currentModel?.id;
+
           // Only save if we have valid positions and current layer model exists
-          if (positions.length > 0 && (currentLayerModel?.id || currentModel?.id)) {
-            savePositionsMutation.mutate(positions);
+          if (positions.length > 0 && targetModelId) {
+            savePositionsMutation.mutate({
+              positions,
+              modelId: targetModelId,
+              layer: currentLayer,
+            });
           }
           
           return currentNodes;
         });
       }, 500); // Save after 500ms of no changes
     }
-  }, [onNodesChange, savePositionsMutation, currentModel?.id, saveToHistory, setEdges]);
+  }, [
+    onNodesChange,
+    savePositionsMutation,
+    currentModel?.id,
+    currentLayerModel?.id,
+    currentLayer,
+    saveToHistory,
+    setEdges,
+    isDataLoading,
+    history.length
+  ]);
 
   // Cleanup timeout on unmount and force save if needed
   useEffect(() => {
@@ -945,6 +972,15 @@ function CanvasComponent() {
         // Find the source and target nodes
         const sourceNode = nodes.find(n => n.id === params.source);
         const targetNode = nodes.find(n => n.id === params.target);
+
+  const extractAttributeId = (handle?: string | null) => {
+          if (!handle || !handle.startsWith('attr-')) return undefined;
+          const match = handle.match(/^attr-(\d+)-/);
+          return match ? parseInt(match[1], 10) : undefined;
+        };
+
+        const sourceAttributeId = extractAttributeId(params.sourceHandle);
+        const targetAttributeId = extractAttributeId(params.targetHandle);
         
         if (sourceNode && targetNode) {
           setAttributeConnection({
@@ -959,7 +995,9 @@ function CanvasComponent() {
               attributes: targetNode.data.attributes
             },
             sourceHandle: params.sourceHandle || undefined,
-            targetHandle: params.targetHandle || undefined
+            targetHandle: params.targetHandle || undefined,
+            sourceAttributeId,
+            targetAttributeId
           });
           setShowAttributeRelationshipModal(true);
         }
@@ -1409,34 +1447,18 @@ function CanvasComponent() {
         };
 
         // Check if we have a current model selected
-        if (!currentModel) {
+        if (!requireModelBeforeAction("Select a data model before adding objects to the canvas.")) {
           console.error('No current model selected when trying to add object:', object.name);
-          toast({
-            title: "No Active Model Selected",
-            description: "Please select a data model before adding objects to the canvas.",
-            variant: "destructive"
-          });
           return;
         }
 
         // Check if we have a valid layer model
-        if (!currentLayerModel) {
-          console.error('No current layer model found:', {
+        if (!currentLayerModel && currentModel) {
+          console.warn('No current layer model found, falling back to current model:', {
             currentModel: currentModel?.id,
             currentLayer,
             objectName: object.name
           });
-          // Try to use the current model as fallback
-          if (currentModel) {
-            console.log('Using current model as fallback:', currentModel.id);
-          } else {
-            toast({
-              title: "Model Layer Not Found",
-              description: `The current model doesn't have a ${currentLayer} layer. Please check your model configuration.`,
-              variant: "destructive"
-            });
-            return;
-          }
         }
 
         // Check if node already exists - improve detection
@@ -1564,11 +1586,8 @@ function CanvasComponent() {
         } else {
           console.error('No current model to add object to');
           setNodes((nds) => nds.filter(n => n.id !== newNode.id));
-          toast({
-            title: "⚠️ No Active Model Selected",
-            description: "Please select a model from the top navigation before adding objects. Current model: " + (currentModel?.name || "None"),
-            variant: "destructive"
-          });
+          requireModelBeforeAction("Select a data model before adding objects to the canvas.");
+          return;
         }
       } else if (type === 'data-area' && reactFlowWrapper.current) {
         const { area, objects } = dropData;
@@ -1618,6 +1637,11 @@ function CanvasComponent() {
             description: `All objects from "${area.name}" are already on the canvas.`,
             variant: "destructive"
           });
+          return;
+        }
+
+        if (!requireModelBeforeAction("Select a data model before adding objects to the canvas.")) {
+          console.error('No current model selected when trying to add data area:', area?.name);
           return;
         }
 
@@ -1684,17 +1708,14 @@ function CanvasComponent() {
           console.error('No current model to add objects to');
           const failedNodeIds = nodesToAdd.map((n: any) => n.id);
           setNodes((nds) => nds.filter((n: any) => !failedNodeIds.includes(n.id)));
-          toast({
-            title: "No Active Model",
-            description: "Please select a model before adding objects.",
-            variant: "destructive"
-          });
+          requireModelBeforeAction("Select a data model before adding objects to the canvas.");
+          return;
         }
       }
     } catch (error) {
       console.error('Failed to parse drop data:', error);
     }
-  }, [setNodes, screenToFlowPosition, saveToHistory, toast]);
+  }, [setNodes, screenToFlowPosition, saveToHistory, toast, requireModelBeforeAction]);
 
   // Node deletion handler
   const onNodeDelete = useCallback((nodeId: string) => {
@@ -1761,16 +1782,42 @@ function CanvasComponent() {
         saveStatus={saveStatus}
         onSave={() => {
           setNodes((currentNodes) => {
-            const validNodes = currentNodes.filter(node => 
-              node.data && node.data.objectId && node.position
-            );
+            const validNodes = currentNodes.filter(node => {
+              const data = node.data || {};
+              const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
+              const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
+              const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
+
+              return (
+                hasIdentifier &&
+                node.position &&
+                typeof node.position.x === 'number' &&
+                typeof node.position.y === 'number' &&
+                !isNaN(node.position.x) &&
+                !isNaN(node.position.y)
+              );
+            });
+
+            const targetModelId = currentLayerModel?.id || currentModel?.id;
             
-            if (validNodes.length > 0 && currentModel?.id) {
-              const positions = validNodes.map(node => ({
-                objectId: node.data.objectId,
-                position: node.position
-              }));
-              savePositionsMutation.mutate(positions);
+            if (validNodes.length > 0 && targetModelId) {
+              const positions = validNodes.map(node => {
+                const data = node.data || {};
+                return {
+                  modelObjectId: typeof data.modelObjectId === 'number' && data.modelObjectId > 0 ? data.modelObjectId : undefined,
+                  objectId: typeof data.objectId === 'number' && data.objectId > 0 ? data.objectId : undefined,
+                  position: {
+                    x: Math.round(node.position.x * 100) / 100,
+                    y: Math.round(node.position.y * 100) / 100,
+                  }
+                };
+              });
+
+              savePositionsMutation.mutate({
+                positions,
+                modelId: targetModelId,
+                layer: currentLayer,
+              });
             }
             
             return currentNodes;
@@ -2017,6 +2064,8 @@ function CanvasComponent() {
           onConfirm={createAttributeRelationship}
           sourceNode={attributeConnection?.sourceNode}
           targetNode={attributeConnection?.targetNode}
+          initialSourceAttributeId={attributeConnection?.sourceAttributeId}
+          initialTargetAttributeId={attributeConnection?.targetAttributeId}
         />
       )}
 
