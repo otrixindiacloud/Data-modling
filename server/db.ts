@@ -1,31 +1,30 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import Database from 'better-sqlite3';
-import { drizzle as drizzleSQLite } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import { Pool as PgPool } from "pg";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
 import ws from "ws";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import * as schema from "@shared/schema";
 
-// Use PostgreSQL if DATABASE_URL is provided, otherwise use SQLite for local development
-const usePostgreSQL = !!process.env.DATABASE_URL;
+const connectionString = process.env.DATABASE_URL;
 
-let db: any;
-let pool: any = null;
+let db: ReturnType<typeof drizzlePg> | ReturnType<typeof drizzleNeon> | null = null;
+let pool: NeonPool | PgPool | null = null;
 
-if (usePostgreSQL) {
-  // Use PostgreSQL when DATABASE_URL is provided
-  neonConfig.webSocketConstructor = ws;
+if (!connectionString) {
+  throw new Error(
+    "DATABASE_URL is not defined. Set it to your Postgres connection string (for example, a Neon database) before running the server or seed scripts.",
+  );
+} else {
+  const usesNeon = /neon\.tech/.test(connectionString) || connectionString.startsWith("postgresql://neon");
 
-  if (!process.env.DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL must be set for PostgreSQL. Did you forget to provision a database?",
-    );
+  if (usesNeon) {
+    neonConfig.webSocketConstructor = ws;
+    pool = new NeonPool({ connectionString });
+    db = drizzleNeon(pool, { schema });
+  } else {
+    pool = new PgPool({ connectionString });
+    db = drizzlePg(pool, { schema });
   }
-
-  pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  db = drizzle({ client: pool, schema });
 }
 
 export { db, pool };

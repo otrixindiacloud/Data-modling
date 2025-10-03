@@ -1,2083 +1,1556 @@
 import { db } from "./db";
-import { 
-  dataModels, 
-  dataDomains, 
-  dataAreas, 
-  dataObjects, 
-  attributes, 
-  relationships, 
+import {
+  dataModels,
+  dataDomains,
+  dataAreas,
+  dataObjects,
+  attributes,
   systems,
-  configurations 
+  configurations,
+  businessCapabilities,
+  capabilityDataDomainMappings,
+  capabilityDataAreaMappings,
+  capabilitySystemMappings,
+  capabilityDataModelMappings,
+  capabilityModelSystemMappings,
+  dataModelSystemMappings,
+  modelLifecyclePhases,
+  modelLifecycleAssignments,
 } from "@shared/schema";
+import type {
+  InsertSystem,
+  InsertDataDomain,
+  InsertDataArea,
+  InsertDataModel,
+  InsertDataObject,
+  InsertAttribute,
+  InsertBusinessCapability,
+  InsertCapabilityDataDomainMapping,
+  InsertCapabilityDataAreaMapping,
+  InsertCapabilitySystemMapping,
+  InsertCapabilityDataModelMapping,
+  InsertCapabilityModelSystemMapping,
+  InsertDataModelSystemMapping,
+  InsertModelLifecyclePhase,
+  InsertModelLifecycleAssignment,
+  System,
+  DataDomain,
+  DataArea,
+  DataObject,
+  DataModel,
+  BusinessCapability,
+  ModelLifecyclePhase,
+} from "@shared/schema";
+
+type Keyed<T> = { key: string } & T;
+
+type RoadmapPriority = "In Flight" | "Q1 FY24" | "Q2 FY24" | "Q3 FY24" | "Q4 FY24" | "Q1 FY25" | "Q2 FY25" | "Q3 FY25";
+
+type CapabilityLifecycleStatus =
+  | "planned"
+  | "in_progress"
+  | "in_validation"
+  | "active";
+
+type CapabilityAlignmentRating = "low" | "medium" | "high";
+
+type CapabilityRiskLevel = "low" | "medium" | "high";
+
+type CapabilityMetadata = {
+  roadmapPriority: RoadmapPriority;
+  metrics?: string[];
+  operatingRegions?: string[];
+  primaryKPIs?: string[];
+};
+
+interface CapabilityDataModelGovernance
+  extends Omit<
+      InsertCapabilityDataModelMapping,
+      "capabilityId" | "modelId" | "domainId" | "lifecyclePhaseId" | "metadata"
+    > {
+  capabilityKey: string;
+  modelKey: string;
+  domainKey?: string;
+  lifecyclePhaseKey?: string;
+  metadata?: CapabilityMetadata;
+}
+
+interface CapabilityModelSystemTrace
+  extends Omit<InsertCapabilityModelSystemMapping, "capabilityId" | "modelId" | "systemId"> {
+  capabilityKey: string;
+  modelKey: string;
+  systemKey: string;
+}
+
+interface LifecycleAssignmentSeed
+  extends Omit<InsertModelLifecycleAssignment, "modelId" | "phaseId"> {
+  modelKey: string;
+  phaseKey: string;
+}
+
+const lifecyclePhasesSeed: InsertModelLifecyclePhase[] = [
+  {
+    key: "ideate",
+    name: "Ideation",
+    description: "Gather business needs and outline desired outcomes",
+    sequence: 1,
+    defaultDurationDays: 10,
+    requiresApproval: false,
+  },
+  {
+    key: "design",
+    name: "Design",
+    description: "Author conceptual and logical representations with stakeholders",
+    sequence: 2,
+    defaultDurationDays: 30,
+    requiresApproval: true,
+  },
+  {
+    key: "build",
+    name: "Build",
+    description: "Implement physical models and integration patterns",
+    sequence: 3,
+    defaultDurationDays: 25,
+    requiresApproval: true,
+  },
+  {
+    key: "validate",
+    name: "Validate",
+    description: "Complete testing, data quality checks, and sign-offs",
+    sequence: 4,
+    defaultDurationDays: 15,
+    requiresApproval: true,
+  },
+  {
+    key: "deploy",
+    name: "Deploy",
+    description: "Promote to production and enable consumption pathways",
+    sequence: 5,
+    defaultDurationDays: 10,
+    requiresApproval: false,
+  },
+  {
+    key: "monitor",
+    name: "Monitor",
+    description: "Track adoption, SLAs, and identify optimization opportunities",
+    sequence: 6,
+    defaultDurationDays: 30,
+    requiresApproval: false,
+  },
+];
+
+const systemsSeed: Array<Keyed<InsertSystem>> = [
+  {
+    key: "erpCore",
+    name: "ERP Core",
+    category: "ERP",
+    type: "erp",
+    description: "Enterprise resource planning backbone for finance, procurement, and production planning",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#2563eb",
+  },
+  {
+    key: "mesControlTower",
+    name: "MES Control Tower",
+    category: "MES",
+    type: "mes",
+    description: "Manufacturing execution system orchestrating shop-floor scheduling and execution",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#7c3aed",
+  },
+  {
+    key: "plmStudio",
+    name: "PLM Studio",
+    category: "PLM",
+    type: "plm",
+    description: "Product lifecycle management for engineering change control and BOM governance",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#db2777",
+  },
+  {
+    key: "qualityLabSuite",
+    name: "Quality Lab Suite",
+    category: "QMS",
+    type: "qms",
+    description: "Quality management suite for lab testing and compliance tracking",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#ea580c",
+  },
+  {
+    key: "assetReliability",
+    name: "Asset Reliability Platform",
+    category: "EAM",
+    type: "eam",
+    description: "Enterprise asset management for maintenance strategy, scheduling, and execution",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#0f172a",
+  },
+  {
+    key: "supplyNetwork",
+    name: "Supply Network Portal",
+    category: "SCM",
+    type: "scm",
+    description: "Supplier collaboration and inbound logistics orchestration",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#15803d",
+  },
+  {
+    key: "manufacturingLakehouse",
+    name: "Manufacturing Lakehouse",
+    category: "Analytics",
+    type: "lakehouse",
+    description: "Centralized analytics-ready storage for manufacturing and IoT data",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#0ea5e9",
+  },
+  {
+    key: "analyticsWorkbench",
+    name: "Analytics Workbench",
+    category: "Analytics",
+    type: "bi",
+    description: "Business intelligence workspace for curated data products",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#f97316",
+  },
+  {
+    key: "industrialIotHub",
+    name: "Industrial IoT Hub",
+    category: "IoT",
+    type: "iot",
+    description: "Edge-to-cloud hub capturing high-frequency shop-floor telemetry",
+    canBeSource: true,
+    canBeTarget: true,
+    status: "connected",
+    colorCode: "#22c55e",
+  },
+];
+
+const dataDomainsSeed: Array<Keyed<InsertDataDomain>> = [
+  {
+    key: "manufacturingOperations",
+    name: "Manufacturing Operations",
+    description: "Production planning, shop-floor execution, and performance tracking",
+    colorCode: "#1d4ed8",
+  },
+  {
+    key: "supplyChain",
+    name: "Supply Chain",
+    description: "Supplier collaboration, materials management, and logistics",
+    colorCode: "#15803d",
+  },
+  {
+    key: "quality",
+    name: "Quality",
+    description: "Quality planning, inspections, and compliance activities",
+    colorCode: "#ea580c",
+  },
+  {
+    key: "productLifecycle",
+    name: "Product Lifecycle",
+    description: "Product definition, change management, and release governance",
+    colorCode: "#9333ea",
+  },
+  {
+    key: "assetManagement",
+    name: "Asset Management",
+    description: "Asset strategy, maintenance planning, and reliability",
+    colorCode: "#0f172a",
+  },
+  {
+    key: "analyticsInsights",
+    name: "Analytics & Insights",
+    description: "Curated analytics products, KPIs, and scorecards",
+    colorCode: "#0ea5e9",
+  },
+];
+
+const dataAreasSeed: Array<
+  Keyed<Omit<InsertDataArea, "domainId">> & {
+    domainKey: string;
+  }
+> = [
+  {
+    key: "productionPlanning",
+    domainKey: "manufacturingOperations",
+    name: "Production Planning",
+    description: "Sales & operations planning, MPS, and capacity balancing",
+    colorCode: "#3b82f6",
+  },
+  {
+    key: "shopFloorControl",
+    domainKey: "manufacturingOperations",
+    name: "Shop Floor Control",
+    description: "Dispatching, work center sequencing, and execution",
+    colorCode: "#1e40af",
+  },
+  {
+    key: "materialsManagement",
+    domainKey: "supplyChain",
+    name: "Materials Management",
+    description: "Inventory, replenishment, and lot/batch tracking",
+    colorCode: "#166534",
+  },
+  {
+    key: "logisticsExecution",
+    domainKey: "supplyChain",
+    name: "Logistics Execution",
+    description: "Warehouse, shipping, and transportation coordination",
+    colorCode: "#14532d",
+  },
+  {
+    key: "qualityControl",
+    domainKey: "quality",
+    name: "Quality Control",
+    description: "In-process and lab inspections, SPC, and test management",
+    colorCode: "#c2410c",
+  },
+  {
+    key: "complianceGovernance",
+    domainKey: "quality",
+    name: "Compliance Governance",
+    description: "Regulatory records, certifications, and deviation management",
+    colorCode: "#b45309",
+  },
+  {
+    key: "productDefinition",
+    domainKey: "productLifecycle",
+    name: "Product Definition",
+    description: "Product master, BOM, and routing governance",
+    colorCode: "#a855f7",
+  },
+  {
+    key: "changeManagement",
+    domainKey: "productLifecycle",
+    name: "Change Management",
+    description: "Engineering change control and release workflow",
+    colorCode: "#7c3aed",
+  },
+  {
+    key: "maintenanceExecution",
+    domainKey: "assetManagement",
+    name: "Maintenance Execution",
+    description: "Preventive, predictive, and corrective maintenance",
+    colorCode: "#111827",
+  },
+  {
+    key: "operationalAnalytics",
+    domainKey: "analyticsInsights",
+    name: "Operational Analytics",
+    description: "Curated metrics for plant and supply network performance",
+    colorCode: "#0891b2",
+  },
+  {
+    key: "performanceManagement",
+    domainKey: "analyticsInsights",
+    name: "Performance Management",
+    description: "Dashboards, KPIs, and continuous improvement scorecards",
+    colorCode: "#0284c7",
+  },
+];
+
+const dataModelsSeed: Array<
+  Keyed<
+    Omit<InsertDataModel, "domainId" | "dataAreaId" | "targetSystemId" | "parentModelId">
+  > & {
+    domainKey?: string;
+    areaKey?: string;
+    targetSystemKey?: string;
+    parentKey?: string;
+  }
+> = [
+  {
+    key: "manufacturingCanonical",
+    name: "Manufacturing Canonical Model",
+    layer: "conceptual",
+    domainKey: "manufacturingOperations",
+    areaKey: "productionPlanning",
+    targetSystemKey: "manufacturingLakehouse",
+  },
+  {
+    key: "shopFloorExecution",
+    name: "Shop Floor Execution Model",
+    layer: "logical",
+    domainKey: "manufacturingOperations",
+    areaKey: "shopFloorControl",
+    targetSystemKey: "mesControlTower",
+    parentKey: "manufacturingCanonical",
+  },
+  {
+    key: "materialsLogistics",
+    name: "Materials & Logistics Model",
+    layer: "logical",
+    domainKey: "supplyChain",
+    areaKey: "materialsManagement",
+    targetSystemKey: "erpCore",
+    parentKey: "manufacturingCanonical",
+  },
+  {
+    key: "qualityIntelligence",
+    name: "Quality Intelligence Model",
+    layer: "conceptual",
+    domainKey: "quality",
+    areaKey: "qualityControl",
+    targetSystemKey: "qualityLabSuite",
+  },
+  {
+    key: "assetReliabilityModel",
+    name: "Asset Reliability Model",
+    layer: "conceptual",
+    domainKey: "assetManagement",
+    areaKey: "maintenanceExecution",
+    targetSystemKey: "assetReliability",
+  },
+  {
+    key: "manufacturingAnalyticsWarehouse",
+    name: "Manufacturing Analytics Warehouse",
+    layer: "physical",
+    domainKey: "analyticsInsights",
+    areaKey: "operationalAnalytics",
+    targetSystemKey: "analyticsWorkbench",
+    parentKey: "manufacturingCanonical",
+  },
+  {
+    key: "productLifecycleModel",
+    name: "Product Lifecycle Collaboration Model",
+    layer: "conceptual",
+    domainKey: "productLifecycle",
+    areaKey: "productDefinition",
+    targetSystemKey: "plmStudio",
+  },
+];
+
+const dataObjectsSeed: Array<
+  Keyed<
+    Omit<InsertDataObject, "modelId" | "domainId" | "dataAreaId" | "sourceSystemId" | "targetSystemId">
+  > & {
+    modelKey: string;
+    domainKey?: string;
+    areaKey?: string;
+    sourceSystemKey?: string;
+    targetSystemKey?: string;
+  }
+> = [
+  {
+    key: "productionPlan",
+    name: "Production Plan",
+    modelKey: "manufacturingCanonical",
+    domainKey: "manufacturingOperations",
+    areaKey: "productionPlanning",
+    sourceSystemKey: "erpCore",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Aggregated production plans by plant, product, and horizon",
+    objectType: "entity",
+    position: { x: 120, y: 80 },
+  },
+  {
+    key: "materialRequirement",
+    name: "Material Requirement",
+    modelKey: "manufacturingCanonical",
+    domainKey: "manufacturingOperations",
+    areaKey: "materialsManagement",
+    sourceSystemKey: "erpCore",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Material demand and coverage snapshots",
+    objectType: "entity",
+    position: { x: 360, y: 80 },
+  },
+  {
+    key: "workOrder",
+    name: "Work Order",
+    modelKey: "shopFloorExecution",
+    domainKey: "manufacturingOperations",
+    areaKey: "shopFloorControl",
+    sourceSystemKey: "mesControlTower",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Detailed work order instructions and status",
+    objectType: "entity",
+    position: { x: 160, y: 240 },
+  },
+  {
+    key: "workCenter",
+    name: "Work Center",
+    modelKey: "shopFloorExecution",
+    domainKey: "manufacturingOperations",
+    areaKey: "shopFloorControl",
+    sourceSystemKey: "mesControlTower",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Work center master with capacity and constraint data",
+    objectType: "reference",
+    position: { x: 420, y: 240 },
+  },
+  {
+    key: "qualityInspection",
+    name: "Quality Inspection",
+    modelKey: "qualityIntelligence",
+    domainKey: "quality",
+    areaKey: "qualityControl",
+    sourceSystemKey: "qualityLabSuite",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Inspection results with characteristic measurements",
+    objectType: "fact",
+    position: { x: 140, y: 420 },
+  },
+  {
+    key: "nonConformance",
+    name: "Non Conformance",
+    modelKey: "qualityIntelligence",
+    domainKey: "quality",
+    areaKey: "complianceGovernance",
+    sourceSystemKey: "qualityLabSuite",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Deviation records and corrective actions",
+    objectType: "event",
+    position: { x: 360, y: 420 },
+  },
+  {
+    key: "supplierCommitment",
+    name: "Supplier Commitment",
+    modelKey: "materialsLogistics",
+    domainKey: "supplyChain",
+    areaKey: "materialsManagement",
+    sourceSystemKey: "supplyNetwork",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Supplier confirmations for material deliveries",
+    objectType: "fact",
+    position: { x: 600, y: 200 },
+  },
+  {
+    key: "shipment",
+    name: "Shipment",
+    modelKey: "materialsLogistics",
+    domainKey: "supplyChain",
+    areaKey: "logisticsExecution",
+    sourceSystemKey: "supplyNetwork",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Outbound shipment and transportation events",
+    objectType: "event",
+    position: { x: 820, y: 200 },
+  },
+  {
+    key: "asset",
+    name: "Asset",
+    modelKey: "assetReliabilityModel",
+    domainKey: "assetManagement",
+    areaKey: "maintenanceExecution",
+    sourceSystemKey: "assetReliability",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Equipment registry with reliability classifications",
+    objectType: "reference",
+    position: { x: 120, y: 600 },
+  },
+  {
+    key: "maintenanceOrder",
+    name: "Maintenance Order",
+    modelKey: "assetReliabilityModel",
+    domainKey: "assetManagement",
+    areaKey: "maintenanceExecution",
+    sourceSystemKey: "assetReliability",
+    targetSystemKey: "manufacturingLakehouse",
+    description: "Maintenance work orders with task and labor details",
+    objectType: "event",
+    position: { x: 340, y: 600 },
+  },
+  {
+    key: "productionFact",
+    name: "Production Fact",
+    modelKey: "manufacturingAnalyticsWarehouse",
+    domainKey: "analyticsInsights",
+    areaKey: "operationalAnalytics",
+    sourceSystemKey: "manufacturingLakehouse",
+    targetSystemKey: "analyticsWorkbench",
+    description: "Aggregated production performance metrics",
+    objectType: "fact",
+    position: { x: 580, y: 420 },
+  },
+  {
+    key: "workCenterDimension",
+    name: "Work Center Dimension",
+    modelKey: "manufacturingAnalyticsWarehouse",
+    domainKey: "analyticsInsights",
+    areaKey: "operationalAnalytics",
+    sourceSystemKey: "manufacturingLakehouse",
+    targetSystemKey: "analyticsWorkbench",
+    description: "Dimensional attributes for work center analysis",
+    objectType: "dimension",
+    position: { x: 760, y: 420 },
+  },
+];
+
+const attributesSeed: Array<
+  Keyed<Omit<InsertAttribute, "objectId">> & {
+    objectKey: string;
+  }
+> = [
+  {
+    key: "productionPlanId",
+    name: "plan_id",
+    objectKey: "productionPlan",
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "UUID",
+    nullable: false,
+    isPrimaryKey: true,
+    description: "Unique identifier for the production plan",
+  },
+  {
+    key: "productionPlanHorizon",
+    name: "planning_horizon",
+    objectKey: "productionPlan",
+    conceptualType: "Period",
+    logicalType: "DATE_RANGE",
+    physicalType: "tstzrange",
+    nullable: false,
+    description: "Start and end dates for the planning cycle",
+  },
+  {
+    key: "workOrderId",
+    name: "work_order_id",
+    objectKey: "workOrder",
+    conceptualType: "Identifier",
+    logicalType: "VARCHAR",
+    physicalType: "VARCHAR(40)",
+    nullable: false,
+    isPrimaryKey: true,
+    description: "Unique identifier for the work order",
+  },
+  {
+    key: "workOrderStatus",
+    name: "status",
+    objectKey: "workOrder",
+    conceptualType: "Status",
+    logicalType: "VARCHAR",
+    physicalType: "VARCHAR(20)",
+    nullable: false,
+    description: "Execution status of the work order",
+  },
+  {
+    key: "qualityInspectionId",
+    name: "inspection_id",
+    objectKey: "qualityInspection",
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "UUID",
+    nullable: false,
+    isPrimaryKey: true,
+    description: "Unique identifier for the inspection record",
+  },
+  {
+    key: "qualityInspectionResult",
+    name: "result",
+    objectKey: "qualityInspection",
+    conceptualType: "Result",
+    logicalType: "VARCHAR",
+    physicalType: "VARCHAR(30)",
+    nullable: false,
+    description: "Pass/fail outcome of the inspection",
+  },
+  {
+    key: "assetId",
+    name: "asset_id",
+    objectKey: "asset",
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "UUID",
+    nullable: false,
+    isPrimaryKey: true,
+    description: "Asset identifier",
+  },
+  {
+    key: "assetCriticality",
+    name: "criticality",
+    objectKey: "asset",
+    conceptualType: "Classification",
+    logicalType: "VARCHAR",
+    physicalType: "VARCHAR(10)",
+    nullable: false,
+    description: "Criticality tier for the asset",
+  },
+  {
+    key: "productionFactQty",
+    name: "produced_qty",
+    objectKey: "productionFact",
+    conceptualType: "Measure",
+    logicalType: "NUMERIC",
+    physicalType: "NUMERIC(18,2)",
+    nullable: false,
+    description: "Produced quantity",
+  },
+  {
+    key: "productionFactScrap",
+    name: "scrap_qty",
+    objectKey: "productionFact",
+    conceptualType: "Measure",
+    logicalType: "NUMERIC",
+    physicalType: "NUMERIC(18,2)",
+    nullable: true,
+    description: "Scrap quantity associated with production",
+  },
+];
+
+const capabilitiesSeed = [
+  {
+    key: "capManufacturing",
+    name: "Manufacturing Value Chain",
+    code: "MANF-VC",
+    level: 1,
+    description: "End-to-end manufacturing business capability map",
+    sortOrder: 1,
+    colorCode: "#1e3a8a",
+    maturityLevel: "defined",
+    criticality: "critical",
+  },
+  {
+    key: "capPlanProduction",
+    name: "Plan Production",
+    code: "MANF-PLAN",
+    level: 2,
+    parentKey: "capManufacturing",
+    description: "Sales & operations planning, master scheduling, and capacity balancing",
+    sortOrder: 10,
+    colorCode: "#2563eb",
+    maturityLevel: "managed",
+    criticality: "high",
+  },
+  {
+    key: "capExecuteManufacturing",
+    name: "Execute Manufacturing",
+    code: "MANF-EXEC",
+    level: 2,
+    parentKey: "capManufacturing",
+    description: "Shop-floor control, production execution, and reporting",
+    sortOrder: 20,
+    colorCode: "#1d4ed8",
+    maturityLevel: "developing",
+    criticality: "high",
+  },
+  {
+    key: "capAssureQuality",
+    name: "Assure Quality",
+    code: "MANF-QUAL",
+    level: 2,
+    parentKey: "capManufacturing",
+    description: "Quality planning, inspections, and compliance management",
+    sortOrder: 30,
+    colorCode: "#c2410c",
+    maturityLevel: "defined",
+    criticality: "high",
+  },
+  {
+    key: "capMaintainAssets",
+    name: "Maintain Assets",
+    code: "MANF-ASSET",
+    level: 2,
+    parentKey: "capManufacturing",
+    description: "Asset strategy, maintenance execution, and reliability engineering",
+    sortOrder: 40,
+    colorCode: "#0f172a",
+    maturityLevel: "developing",
+    criticality: "medium",
+  },
+  {
+    key: "capAnalyzePerformance",
+    name: "Analyze Performance",
+    code: "MANF-ANALYZE",
+    level: 2,
+    parentKey: "capManufacturing",
+    description: "Manufacturing analytics, KPI management, and continuous improvement",
+    sortOrder: 50,
+    colorCode: "#0ea5e9",
+    maturityLevel: "basic",
+    criticality: "medium",
+  },
+  {
+    key: "capDemandSupply",
+    name: "Demand & Supply Planning",
+    code: "MANF-PLAN-01",
+    level: 3,
+    parentKey: "capPlanProduction",
+    description: "Integrated demand, supply, and inventory planning",
+    sortOrder: 11,
+    colorCode: "#3b82f6",
+    maturityLevel: "defined",
+    criticality: "high",
+  },
+  {
+    key: "capMasterScheduling",
+    name: "Master Production Scheduling",
+    code: "MANF-PLAN-02",
+    level: 3,
+    parentKey: "capPlanProduction",
+    description: "Translate plans into feasible production schedules",
+    sortOrder: 12,
+    colorCode: "#1d4ed8",
+    maturityLevel: "managed",
+    criticality: "high",
+  },
+  {
+    key: "capShopFloorControl",
+    name: "Shop Floor Control",
+    code: "MANF-EXEC-01",
+    level: 3,
+    parentKey: "capExecuteManufacturing",
+    description: "Dispatch, monitor, and adjust shop-floor execution",
+    sortOrder: 21,
+    colorCode: "#1e40af",
+    maturityLevel: "developing",
+    criticality: "high",
+  },
+  {
+    key: "capProductionReporting",
+    name: "Production Reporting",
+    code: "MANF-EXEC-02",
+    level: 3,
+    parentKey: "capExecuteManufacturing",
+    description: "Capture production performance, variances, and losses",
+    sortOrder: 22,
+    colorCode: "#1d4ed8",
+    maturityLevel: "developing",
+    criticality: "medium",
+  },
+  {
+    key: "capQualityControl",
+    name: "Quality Control",
+    code: "MANF-QUAL-01",
+    level: 3,
+    parentKey: "capAssureQuality",
+    description: "Inspect materials and finished goods to ensure specifications",
+    sortOrder: 31,
+    colorCode: "#ea580c",
+    maturityLevel: "defined",
+    criticality: "high",
+  },
+  {
+    key: "capComplianceManagement",
+    name: "Compliance Management",
+    code: "MANF-QUAL-02",
+    level: 3,
+    parentKey: "capAssureQuality",
+    description: "Govern deviations, CAPAs, and regulatory documentation",
+    sortOrder: 32,
+    colorCode: "#b45309",
+    maturityLevel: "defined",
+    criticality: "high",
+  },
+  {
+    key: "capMaintenanceExecution",
+    name: "Maintenance Execution",
+    code: "MANF-ASSET-01",
+    level: 3,
+    parentKey: "capMaintainAssets",
+    description: "Plan and execute corrective and preventive maintenance",
+    sortOrder: 41,
+    colorCode: "#0f172a",
+    maturityLevel: "developing",
+    criticality: "medium",
+  },
+  {
+    key: "capAssetStrategy",
+    name: "Asset Strategy",
+    code: "MANF-ASSET-02",
+    level: 3,
+    parentKey: "capMaintainAssets",
+    description: "Optimize maintenance strategies and reliability",
+    sortOrder: 42,
+    colorCode: "#1f2937",
+    maturityLevel: "basic",
+    criticality: "medium",
+  },
+  {
+    key: "capOperationalAnalytics",
+    name: "Operational Analytics",
+    code: "MANF-ANALYZE-01",
+    level: 3,
+    parentKey: "capAnalyzePerformance",
+    description: "Deliver KPIs and insights for manufacturing performance",
+    sortOrder: 51,
+    colorCode: "#0ea5e9",
+    maturityLevel: "basic",
+    criticality: "medium",
+  },
+  {
+    key: "capSupplierCollaboration",
+    name: "Supplier Collaboration",
+    code: "MANF-SUP-01",
+    level: 3,
+    parentKey: "capPlanProduction",
+    description: "Engage suppliers to secure material availability",
+    sortOrder: 13,
+    colorCode: "#15803d",
+    maturityLevel: "developing",
+    criticality: "high",
+  },
+];
+
+const capabilityDomainMappingsSeed: Array<
+  Omit<InsertCapabilityDataDomainMapping, "capabilityId" | "domainId"> & {
+    capabilityKey: string;
+    domainKey: string;
+  }
+> = [
+  { capabilityKey: "capPlanProduction", domainKey: "manufacturingOperations", mappingType: "primary" },
+  { capabilityKey: "capDemandSupply", domainKey: "manufacturingOperations", mappingType: "primary" },
+  { capabilityKey: "capMasterScheduling", domainKey: "manufacturingOperations", mappingType: "primary" },
+  { capabilityKey: "capExecuteManufacturing", domainKey: "manufacturingOperations", mappingType: "primary" },
+  { capabilityKey: "capShopFloorControl", domainKey: "manufacturingOperations", mappingType: "primary" },
+  { capabilityKey: "capProductionReporting", domainKey: "analyticsInsights", mappingType: "supporting" },
+  { capabilityKey: "capAssureQuality", domainKey: "quality", mappingType: "primary" },
+  { capabilityKey: "capQualityControl", domainKey: "quality", mappingType: "primary" },
+  { capabilityKey: "capComplianceManagement", domainKey: "quality", mappingType: "primary" },
+  { capabilityKey: "capMaintainAssets", domainKey: "assetManagement", mappingType: "primary" },
+  { capabilityKey: "capMaintenanceExecution", domainKey: "assetManagement", mappingType: "primary" },
+  { capabilityKey: "capAnalyzePerformance", domainKey: "analyticsInsights", mappingType: "primary" },
+  { capabilityKey: "capOperationalAnalytics", domainKey: "analyticsInsights", mappingType: "primary" },
+  { capabilityKey: "capSupplierCollaboration", domainKey: "supplyChain", mappingType: "primary" },
+];
+
+const capabilityAreaMappingsSeed: Array<
+  Omit<InsertCapabilityDataAreaMapping, "capabilityId" | "dataAreaId"> & {
+    capabilityKey: string;
+    areaKey: string;
+  }
+> = [
+  { capabilityKey: "capPlanProduction", areaKey: "productionPlanning", mappingType: "primary" },
+  { capabilityKey: "capDemandSupply", areaKey: "productionPlanning", mappingType: "primary" },
+  { capabilityKey: "capMasterScheduling", areaKey: "productionPlanning", mappingType: "primary" },
+  { capabilityKey: "capExecuteManufacturing", areaKey: "shopFloorControl", mappingType: "primary" },
+  { capabilityKey: "capShopFloorControl", areaKey: "shopFloorControl", mappingType: "primary" },
+  { capabilityKey: "capProductionReporting", areaKey: "operationalAnalytics", mappingType: "primary" },
+  { capabilityKey: "capAssureQuality", areaKey: "qualityControl", mappingType: "primary" },
+  { capabilityKey: "capQualityControl", areaKey: "qualityControl", mappingType: "primary" },
+  { capabilityKey: "capComplianceManagement", areaKey: "complianceGovernance", mappingType: "primary" },
+  { capabilityKey: "capMaintainAssets", areaKey: "maintenanceExecution", mappingType: "primary" },
+  { capabilityKey: "capMaintenanceExecution", areaKey: "maintenanceExecution", mappingType: "primary" },
+  { capabilityKey: "capOperationalAnalytics", areaKey: "operationalAnalytics", mappingType: "primary" },
+  { capabilityKey: "capSupplierCollaboration", areaKey: "materialsManagement", mappingType: "primary" },
+];
+
+const capabilitySystemMappingsSeed: Array<
+  Omit<InsertCapabilitySystemMapping, "capabilityId" | "systemId"> & {
+    capabilityKey: string;
+    systemKey: string;
+  }
+> = [
+  { capabilityKey: "capPlanProduction", systemKey: "erpCore", mappingType: "enables", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capDemandSupply", systemKey: "erpCore", mappingType: "enables", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capMasterScheduling", systemKey: "erpCore", mappingType: "enables", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capExecuteManufacturing", systemKey: "mesControlTower", mappingType: "automates", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capShopFloorControl", systemKey: "mesControlTower", mappingType: "automates", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capProductionReporting", systemKey: "manufacturingLakehouse", mappingType: "supports", systemRole: "secondary", coverage: "partial" },
+  { capabilityKey: "capAssureQuality", systemKey: "qualityLabSuite", mappingType: "enables", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capQualityControl", systemKey: "qualityLabSuite", mappingType: "enables", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capComplianceManagement", systemKey: "qualityLabSuite", mappingType: "supports", systemRole: "primary", coverage: "partial" },
+  { capabilityKey: "capMaintainAssets", systemKey: "assetReliability", mappingType: "automates", systemRole: "primary", coverage: "partial" },
+  { capabilityKey: "capMaintenanceExecution", systemKey: "assetReliability", mappingType: "automates", systemRole: "primary", coverage: "partial" },
+  { capabilityKey: "capOperationalAnalytics", systemKey: "analyticsWorkbench", mappingType: "supports", systemRole: "primary", coverage: "full" },
+  { capabilityKey: "capSupplierCollaboration", systemKey: "supplyNetwork", mappingType: "enables", systemRole: "primary", coverage: "partial" },
+];
+
+const dataModelSystemMappingsSeed: Array<
+  Omit<InsertDataModelSystemMapping, "modelId" | "systemId"> & {
+    modelKey: string;
+    systemKey: string;
+  }
+> = [
+  { modelKey: "manufacturingCanonical", systemKey: "manufacturingLakehouse", relationshipType: "integration", systemRole: "consumer", lifecycleState: "design" },
+  { modelKey: "shopFloorExecution", systemKey: "mesControlTower", relationshipType: "integration", systemRole: "primary", lifecycleState: "build" },
+  { modelKey: "shopFloorExecution", systemKey: "industrialIotHub", relationshipType: "telemetry", systemRole: "supporting", lifecycleState: "build" },
+  { modelKey: "materialsLogistics", systemKey: "erpCore", relationshipType: "integration", systemRole: "primary", lifecycleState: "design" },
+  { modelKey: "qualityIntelligence", systemKey: "qualityLabSuite", relationshipType: "integration", systemRole: "primary", lifecycleState: "design" },
+  { modelKey: "assetReliabilityModel", systemKey: "assetReliability", relationshipType: "integration", systemRole: "primary", lifecycleState: "design" },
+  { modelKey: "manufacturingAnalyticsWarehouse", systemKey: "analyticsWorkbench", relationshipType: "delivery", systemRole: "primary", lifecycleState: "validate" },
+  { modelKey: "manufacturingAnalyticsWarehouse", systemKey: "manufacturingLakehouse", relationshipType: "source", systemRole: "supporting", lifecycleState: "build" },
+  { modelKey: "productLifecycleModel", systemKey: "plmStudio", relationshipType: "integration", systemRole: "primary", lifecycleState: "design" },
+];
+
+const capabilityDataModelMappingsSeed: CapabilityDataModelGovernance[] = [
+  {
+    capabilityKey: "capPlanProduction",
+    modelKey: "manufacturingCanonical",
+    domainKey: "manufacturingOperations",
+    lifecyclePhaseKey: "design",
+    lifecycleStatus: "active",
+    alignmentRating: "high",
+    businessValueScore: 5,
+    readinessScore: 4,
+    riskLevel: "medium",
+    governanceOwner: "Director of Manufacturing Planning",
+    dataSteward: "Planning Excellence Lead",
+    solutionArchitect: "Enterprise Data Architect",
+    dataCustodian: "Manufacturing Data Ops",
+    qaOwner: "Planning Quality Lead",
+    reviewCadence: "Quarterly",
+    authoritativeSource: true,
+    notes: "Canonical planning model driving S&OP alignment",
+    metadata: { roadmapPriority: "Q3 FY24", operatingRegions: ["NA", "EU"] },
+  },
+  {
+    capabilityKey: "capDemandSupply",
+    modelKey: "manufacturingCanonical",
+    domainKey: "manufacturingOperations",
+    lifecyclePhaseKey: "design",
+    lifecycleStatus: "active",
+    alignmentRating: "high",
+    businessValueScore: 5,
+    readinessScore: 4,
+    riskLevel: "low",
+    governanceOwner: "Director of Integrated Planning",
+    dataSteward: "Demand Planning Lead",
+    solutionArchitect: "Data Solution Architect",
+    dataCustodian: "Manufacturing Data Ops",
+    qaOwner: "Demand Excellence",
+    reviewCadence: "Monthly",
+    authoritativeSource: true,
+    notes: "Feeds supply-demand balancing analytics",
+    metadata: { roadmapPriority: "Q2 FY24", metrics: ["Forecast Accuracy"] },
+  },
+  {
+    capabilityKey: "capMasterScheduling",
+    modelKey: "manufacturingCanonical",
+    domainKey: "manufacturingOperations",
+    lifecyclePhaseKey: "design",
+    lifecycleStatus: "active",
+    alignmentRating: "medium",
+    businessValueScore: 4,
+    readinessScore: 3,
+    riskLevel: "medium",
+    governanceOwner: "Master Scheduler Lead",
+    dataSteward: "Production Planning Analyst",
+    solutionArchitect: "Manufacturing Architect",
+    dataCustodian: "Manufacturing Data Ops",
+    qaOwner: "Scheduling Quality",
+    reviewCadence: "Monthly",
+    authoritativeSource: false,
+    notes: "Requires integration with constraint-based scheduling",
+    metadata: { roadmapPriority: "Q4 FY24" },
+  },
+  {
+    capabilityKey: "capShopFloorControl",
+    modelKey: "shopFloorExecution",
+    domainKey: "manufacturingOperations",
+    lifecyclePhaseKey: "build",
+    lifecycleStatus: "in_progress",
+    alignmentRating: "high",
+    businessValueScore: 5,
+    readinessScore: 3,
+    riskLevel: "high",
+    governanceOwner: "VP Manufacturing",
+    dataSteward: "MES Data Steward",
+    solutionArchitect: "Shop-Floor Architect",
+    dataCustodian: "MES Platform Team",
+    qaOwner: "Manufacturing QA",
+    reviewCadence: "Bi-Weekly",
+    authoritativeSource: false,
+    notes: "Shop floor telemetry integration underway",
+    metadata: { roadmapPriority: "Q1 FY25" },
+  },
+  {
+    capabilityKey: "capProductionReporting",
+    modelKey: "manufacturingAnalyticsWarehouse",
+    domainKey: "analyticsInsights",
+    lifecyclePhaseKey: "validate",
+    lifecycleStatus: "in_validation",
+    alignmentRating: "high",
+    businessValueScore: 4,
+    readinessScore: 4,
+    riskLevel: "low",
+    governanceOwner: "Director Manufacturing Analytics",
+    dataSteward: "Analytics Product Owner",
+    solutionArchitect: "Analytics Architect",
+    dataCustodian: "Analytics Engineering",
+    qaOwner: "Analytics QA",
+    reviewCadence: "Monthly",
+    authoritativeSource: true,
+    notes: "Supports manufacturing performance dashboards",
+    metadata: { roadmapPriority: "Q1 FY24", primaryKPIs: ["OEE", "Throughput"] },
+  },
+  {
+    capabilityKey: "capQualityControl",
+    modelKey: "qualityIntelligence",
+    domainKey: "quality",
+    lifecyclePhaseKey: "build",
+    lifecycleStatus: "active",
+    alignmentRating: "high",
+    businessValueScore: 5,
+    readinessScore: 4,
+    riskLevel: "medium",
+    governanceOwner: "Head of Quality",
+    dataSteward: "Quality Data Steward",
+    solutionArchitect: "Quality Systems Architect",
+    dataCustodian: "Quality Informatics",
+    qaOwner: "Quality QA",
+    reviewCadence: "Monthly",
+    authoritativeSource: true,
+    notes: "Foundation for SPC and lab analytics",
+    metadata: { roadmapPriority: "Q2 FY24" },
+  },
+  {
+    capabilityKey: "capComplianceManagement",
+    modelKey: "qualityIntelligence",
+    domainKey: "quality",
+    lifecyclePhaseKey: "validate",
+    lifecycleStatus: "planned",
+    alignmentRating: "medium",
+    businessValueScore: 4,
+    readinessScore: 2,
+    riskLevel: "high",
+    governanceOwner: "Compliance Director",
+    dataSteward: "Compliance Data Steward",
+    solutionArchitect: "Quality Systems Architect",
+    dataCustodian: "Quality Informatics",
+    qaOwner: "Compliance QA",
+    reviewCadence: "Quarterly",
+    authoritativeSource: false,
+    notes: "Requires governance for regulatory reporting",
+    metadata: { roadmapPriority: "Q3 FY25" },
+  },
+  {
+    capabilityKey: "capMaintenanceExecution",
+    modelKey: "assetReliabilityModel",
+    domainKey: "assetManagement",
+    lifecyclePhaseKey: "design",
+    lifecycleStatus: "active",
+    alignmentRating: "medium",
+    businessValueScore: 4,
+    readinessScore: 3,
+    riskLevel: "medium",
+    governanceOwner: "Maintenance Director",
+    dataSteward: "Asset Data Steward",
+    solutionArchitect: "Asset Architect",
+    dataCustodian: "Asset Reliability Platform",
+    qaOwner: "Maintenance QA",
+    reviewCadence: "Bi-Monthly",
+    authoritativeSource: false,
+    notes: "Focus on predictive maintenance expansion",
+    metadata: { roadmapPriority: "Q2 FY25" },
+  },
+  {
+    capabilityKey: "capOperationalAnalytics",
+    modelKey: "manufacturingAnalyticsWarehouse",
+    domainKey: "analyticsInsights",
+    lifecyclePhaseKey: "monitor",
+    lifecycleStatus: "active",
+    alignmentRating: "high",
+    businessValueScore: 5,
+    readinessScore: 5,
+    riskLevel: "low",
+    governanceOwner: "Director Manufacturing Analytics",
+    dataSteward: "Analytics Product Owner",
+    solutionArchitect: "Analytics Architect",
+    dataCustodian: "Analytics Engineering",
+    qaOwner: "Analytics QA",
+    reviewCadence: "Monthly",
+    authoritativeSource: true,
+    notes: "Drives KPI scorecards for the enterprise",
+    metadata: { roadmapPriority: "In Flight" },
+  },
+  {
+    capabilityKey: "capSupplierCollaboration",
+    modelKey: "materialsLogistics",
+    domainKey: "supplyChain",
+    lifecyclePhaseKey: "build",
+    lifecycleStatus: "in_progress",
+    alignmentRating: "medium",
+    businessValueScore: 4,
+    readinessScore: 3,
+    riskLevel: "medium",
+    governanceOwner: "Supply Network Lead",
+    dataSteward: "Supplier Collaboration Steward",
+    solutionArchitect: "Supply Chain Architect",
+    dataCustodian: "Supply Network Platform",
+    qaOwner: "Supply Chain QA",
+    reviewCadence: "Quarterly",
+    authoritativeSource: false,
+    notes: "Extends supplier visibility and ASN integration",
+    metadata: { roadmapPriority: "Q4 FY24" },
+  },
+];
+
+const capabilityModelSystemMappingsSeed: CapabilityModelSystemTrace[] = [
+  {
+    capabilityKey: "capPlanProduction",
+    modelKey: "manufacturingCanonical",
+    systemKey: "erpCore",
+    relationshipType: "integration",
+    systemRole: "primary",
+    lifecycleStatus: "active",
+    deploymentStatus: "production",
+    heatmapScore: 4,
+    riskScore: 2,
+    slaHours: 4,
+    isPrimary: true,
+  },
+  {
+    capabilityKey: "capPlanProduction",
+    modelKey: "manufacturingCanonical",
+    systemKey: "manufacturingLakehouse",
+    relationshipType: "delivery",
+    systemRole: "consumer",
+    lifecycleStatus: "active",
+    deploymentStatus: "production",
+    heatmapScore: 3,
+    riskScore: 2,
+    slaHours: 8,
+    isPrimary: false,
+  },
+  {
+    capabilityKey: "capShopFloorControl",
+    modelKey: "shopFloorExecution",
+    systemKey: "mesControlTower",
+    relationshipType: "integration",
+    systemRole: "primary",
+    lifecycleStatus: "in_progress",
+    deploymentStatus: "pilot",
+    heatmapScore: 5,
+    riskScore: 4,
+    slaHours: 1,
+    isPrimary: true,
+  },
+  {
+    capabilityKey: "capShopFloorControl",
+    modelKey: "shopFloorExecution",
+    systemKey: "industrialIotHub",
+    relationshipType: "telemetry",
+    systemRole: "supporting",
+    lifecycleStatus: "in_progress",
+    deploymentStatus: "pilot",
+    heatmapScore: 4,
+    riskScore: 3,
+    slaHours: 1,
+    isPrimary: false,
+  },
+  {
+    capabilityKey: "capQualityControl",
+    modelKey: "qualityIntelligence",
+    systemKey: "qualityLabSuite",
+    relationshipType: "integration",
+    systemRole: "primary",
+    lifecycleStatus: "active",
+    deploymentStatus: "production",
+    heatmapScore: 4,
+    riskScore: 2,
+    slaHours: 6,
+    isPrimary: true,
+  },
+  {
+    capabilityKey: "capOperationalAnalytics",
+    modelKey: "manufacturingAnalyticsWarehouse",
+    systemKey: "analyticsWorkbench",
+    relationshipType: "delivery",
+    systemRole: "primary",
+    lifecycleStatus: "active",
+    deploymentStatus: "production",
+    heatmapScore: 4,
+    riskScore: 1,
+    slaHours: 24,
+    isPrimary: true,
+  },
+  {
+    capabilityKey: "capSupplierCollaboration",
+    modelKey: "materialsLogistics",
+    systemKey: "supplyNetwork",
+    relationshipType: "integration",
+    systemRole: "primary",
+    lifecycleStatus: "in_progress",
+    deploymentStatus: "pilot",
+    heatmapScore: 3,
+    riskScore: 3,
+    slaHours: 12,
+    isPrimary: true,
+  },
+];
+
+const modelLifecycleAssignmentsSeed: LifecycleAssignmentSeed[] = [
+  {
+    modelKey: "manufacturingCanonical",
+    phaseKey: "design",
+    status: "completed",
+    approvalStatus: "approved",
+    completedAt: new Date("2024-01-15T00:00:00Z"),
+    approvedBy: "Enterprise Data Council",
+  },
+  {
+    modelKey: "manufacturingCanonical",
+    phaseKey: "build",
+    status: "in_progress",
+    approvalStatus: "pending",
+    startedAt: new Date("2024-02-01T00:00:00Z"),
+  },
+  {
+    modelKey: "shopFloorExecution",
+    phaseKey: "build",
+    status: "in_progress",
+    approvalStatus: "pending",
+    startedAt: new Date("2024-03-05T00:00:00Z"),
+  },
+  {
+    modelKey: "manufacturingAnalyticsWarehouse",
+    phaseKey: "validate",
+    status: "in_progress",
+    approvalStatus: "pending",
+    startedAt: new Date("2024-03-20T00:00:00Z"),
+  },
+  {
+    modelKey: "qualityIntelligence",
+    phaseKey: "build",
+    status: "completed",
+    approvalStatus: "approved",
+    completedAt: new Date("2023-11-10T00:00:00Z"),
+    approvedBy: "Quality Governance Board",
+    nextReviewAt: new Date("2024-05-10T00:00:00Z"),
+  },
+  {
+    modelKey: "assetReliabilityModel",
+    phaseKey: "design",
+    status: "completed",
+    approvalStatus: "approved",
+    completedAt: new Date("2024-02-28T00:00:00Z"),
+    approvedBy: "Asset Steering Committee",
+  },
+  {
+    modelKey: "materialsLogistics",
+    phaseKey: "design",
+    status: "in_progress",
+    approvalStatus: "pending",
+    startedAt: new Date("2024-04-02T00:00:00Z"),
+  },
+];
+
+function assertKeyedLookup<T>(map: Map<string, T | undefined>, key: string, entity: string): T {
+  const value = map.get(key);
+  if (!value) {
+    throw new Error(`Unable to locate ${entity} with key "${key}" during seed import`);
+  }
+  return value;
+}
 
 export async function seedDatabase() {
   console.log("🌱 Starting database seeding...");
 
   try {
-    // Clear existing data
-    await db.delete(configurations);
-    await db.delete(relationships);
-    await db.delete(attributes);
-    await db.delete(dataObjects);
-    await db.delete(dataAreas);
-    await db.delete(dataDomains);
-    await db.delete(dataModels);
+  await db.transaction(async (trx: typeof db) => {
+      await trx.delete(configurations);
+      await trx.delete(capabilityModelSystemMappings);
+      await trx.delete(capabilityDataModelMappings);
+      await trx.delete(capabilitySystemMappings);
+      await trx.delete(capabilityDataAreaMappings);
+      await trx.delete(capabilityDataDomainMappings);
+      await trx.delete(modelLifecycleAssignments);
+      await trx.delete(dataModelSystemMappings);
+      await trx.delete(businessCapabilities);
+      await trx.delete(modelLifecyclePhases);
+      await trx.delete(attributes);
+      await trx.delete(dataObjects);
+      await trx.delete(dataModels);
+      await trx.delete(dataAreas);
+      await trx.delete(dataDomains);
+      await trx.delete(systems);
 
-    // Seed Systems first (needed for foreign key references)
-    const [dataLakeSystem, dataWarehouseSystem, sapSystem] = await db.insert(systems).values([
-      {
-        name: "Data Lake",
-        category: "Data Storage",
-        type: "adls",
-        description: "Azure Data Lake Storage for raw data ingestion",
-        canBeSource: false,
-        canBeTarget: true
-      },
-      {
-        name: "Data Warehouse",
-        category: "Data Storage", 
-        type: "sql",
-        description: "SQL Data Warehouse for structured analytics",
-        canBeSource: false,
-        canBeTarget: true
-      },
-      {
-        name: "SAP ERP",
-        category: "Enterprise Resource Planning",
-        type: "api",
-        description: "SAP ERP system for enterprise operations",
-        canBeSource: true,
-        canBeTarget: false
+      const insertedSystems = await trx
+        .insert(systems)
+        .values(systemsSeed.map(({ key: _key, ...values }) => values))
+        .returning();
+      const systemIdByKey = new Map<string, System["id"]>();
+  insertedSystems.forEach((row: System, index: number) => {
+        systemIdByKey.set(systemsSeed[index].key, row.id);
+      });
+
+      const insertedPhases = await trx.insert(modelLifecyclePhases).values(lifecyclePhasesSeed).returning();
+      const phaseIdByKey = new Map<string, ModelLifecyclePhase["id"]>();
+  insertedPhases.forEach((row: ModelLifecyclePhase, index: number) => {
+        phaseIdByKey.set(lifecyclePhasesSeed[index].key, row.id);
+      });
+
+      const insertedDomains = await trx
+        .insert(dataDomains)
+        .values(dataDomainsSeed.map(({ key: _key, ...values }) => values))
+        .returning();
+      const domainIdByKey = new Map<string, DataDomain["id"]>();
+  insertedDomains.forEach((row: DataDomain, index: number) => {
+        domainIdByKey.set(dataDomainsSeed[index].key, row.id);
+      });
+
+      const insertedAreas = await trx
+        .insert(dataAreas)
+        .values(
+          dataAreasSeed.map(({ key: _key, domainKey, ...values }) => ({
+            ...values,
+            domainId: assertKeyedLookup(domainIdByKey, domainKey, "data domain"),
+          }))
+        )
+        .returning();
+      const areaIdByKey = new Map<string, DataArea["id"]>();
+  insertedAreas.forEach((row: DataArea, index: number) => {
+        areaIdByKey.set(dataAreasSeed[index].key, row.id);
+      });
+
+      const modelIdByKey = new Map<string, DataModel["id"]>();
+      for (const model of dataModelsSeed) {
+        const { key, domainKey, areaKey, targetSystemKey, parentKey, ...values } = model;
+        const [insertedModel] = await trx
+          .insert(dataModels)
+          .values({
+            ...values,
+            domainId: domainKey ? assertKeyedLookup(domainIdByKey, domainKey, "data domain") : null,
+            dataAreaId: areaKey ? assertKeyedLookup(areaIdByKey, areaKey, "data area") : null,
+            targetSystemId: targetSystemKey ? assertKeyedLookup(systemIdByKey, targetSystemKey, "system") : null,
+            parentModelId: parentKey ? assertKeyedLookup(modelIdByKey, parentKey, "data model") : null,
+          })
+          .returning();
+        modelIdByKey.set(key, insertedModel.id);
       }
-    ]).returning();
 
-    // Seed Data Domains
-    const [hrDomain, financeDomain, operationsDomain, manufacturingDomain, qualityDomain, supplyChainDomain, sapPlanningDomain, sapProductionDomain, sapMaterialsDomain, sapMaintenanceDomain] = await db.insert(dataDomains).values([
-      {
-        name: "Human Resources",
-        description: "People management and organizational data"
-      },
-      {
-        name: "Finance",
-        description: "Financial transactions and accounting data"
-      },
-      {
-        name: "Operations",
-        description: "Day-to-day business operations and processes"
-      },
-      {
-        name: "Manufacturing",
-        description: "Production processes and manufacturing operations"
-      },
-      {
-        name: "Quality Control",
-        description: "Quality assurance and control processes"
-      },
-      {
-        name: "Supply Chain",
-        description: "Supply chain management and logistics"
-      },
-      {
-        name: "SAP Production Planning",
-        description: "SAP PP module - Production planning and control"
-      },
-      {
-        name: "SAP Manufacturing Execution",
-        description: "SAP MES - Manufacturing execution systems"
-      },
-      {
-        name: "SAP Materials Management",
-        description: "SAP MM module - Materials and inventory management"
-      },
-      {
-        name: "SAP Plant Maintenance",
-        description: "SAP PM module - Equipment and maintenance management"
+      const insertedObjects = await trx
+        .insert(dataObjects)
+        .values(
+          dataObjectsSeed.map(({ key: _key, modelKey, domainKey, areaKey, sourceSystemKey, targetSystemKey, ...values }) => ({
+            ...values,
+            modelId: assertKeyedLookup(modelIdByKey, modelKey, "data model"),
+            domainId: domainKey ? assertKeyedLookup(domainIdByKey, domainKey, "data domain") : null,
+            dataAreaId: areaKey ? assertKeyedLookup(areaIdByKey, areaKey, "data area") : null,
+            sourceSystemId: sourceSystemKey ? assertKeyedLookup(systemIdByKey, sourceSystemKey, "system") : null,
+            targetSystemId: targetSystemKey ? assertKeyedLookup(systemIdByKey, targetSystemKey, "system") : null,
+          }))
+        )
+        .returning();
+      const objectIdByKey = new Map<string, number>();
+  insertedObjects.forEach((row: DataObject, index: number) => {
+        objectIdByKey.set(dataObjectsSeed[index].key, row.id);
+      });
+
+      if (attributesSeed.length > 0) {
+        await trx.insert(attributes).values(
+          attributesSeed.map(({ key: _key, objectKey, ...values }) => ({
+            ...values,
+            objectId: assertKeyedLookup(objectIdByKey, objectKey, "data object"),
+          }))
+        );
       }
-    ]).returning();
 
-    // Seed Data Areas
-    const [talentArea, payrollArea, accountingArea, procurementArea, productionArea, maintenanceArea, qualityAssuranceArea, inventoryArea, logisticsArea, sapMrpArea, sapProductionOrdersArea, sapBomArea, sapRoutingArea, sapCapacityArea, sapShopFloorArea, sapMaterialMasterArea, sapPurchasingArea, sapWarehouseArea, sapMaintenanceOrdersArea, sapEquipmentArea, sapWorkCenterArea] = await db.insert(dataAreas).values([
-      {
-        name: "Talent Management",
-        domainId: hrDomain.id,
-        description: "Employee lifecycle and performance"
-      },
-      {
-        name: "Payroll",
-        domainId: hrDomain.id,
-        description: "Compensation and benefits"
-      },
-      {
-        name: "Accounting",
-        domainId: financeDomain.id,
-        description: "Financial records and reporting"
-      },
-      {
-        name: "Procurement",
-        domainId: operationsDomain.id,
-        description: "Purchasing and supplier management"
-      },
-      {
-        name: "Production Planning",
-        domainId: manufacturingDomain.id,
-        description: "Manufacturing schedules and production planning"
-      },
-      {
-        name: "Equipment Maintenance",
-        domainId: manufacturingDomain.id,
-        description: "Equipment maintenance and downtime tracking"
-      },
-      {
-        name: "Quality Assurance",
-        domainId: qualityDomain.id,
-        description: "Quality control and testing processes"
-      },
-      {
-        name: "Inventory Management",
-        domainId: supplyChainDomain.id,
-        description: "Raw materials and finished goods inventory"
-      },
-      {
-        name: "Logistics",
-        domainId: supplyChainDomain.id,
-        description: "Shipping and distribution management"
-      },
-      {
-        name: "SAP MRP",
-        domainId: sapPlanningDomain.id,
-        description: "Material Requirements Planning"
-      },
-      {
-        name: "SAP Production Orders",
-        domainId: sapPlanningDomain.id,
-        description: "Production order management and tracking"
-      },
-      {
-        name: "SAP BOM Management",
-        domainId: sapPlanningDomain.id,
-        description: "Bill of Materials structure and versions"
-      },
-      {
-        name: "SAP Routing",
-        domainId: sapPlanningDomain.id,
-        description: "Production routing and operations"
-      },
-      {
-        name: "SAP Capacity Planning",
-        domainId: sapPlanningDomain.id,
-        description: "Resource and capacity management"
-      },
-      {
-        name: "SAP Shop Floor Control",
-        domainId: sapProductionDomain.id,
-        description: "Real-time production execution and monitoring"
-      },
-      {
-        name: "SAP Material Master",
-        domainId: sapMaterialsDomain.id,
-        description: "Material master data and classifications"
-      },
-      {
-        name: "SAP Purchasing",
-        domainId: sapMaterialsDomain.id,
-        description: "Purchase orders and vendor management"
-      },
-      {
-        name: "SAP Warehouse Management",
-        domainId: sapMaterialsDomain.id,
-        description: "Storage location and stock movements"
-      },
-      {
-        name: "SAP Maintenance Orders",
-        domainId: sapMaintenanceDomain.id,
-        description: "Preventive and corrective maintenance orders"
-      },
-      {
-        name: "SAP Equipment Master",
-        domainId: sapMaintenanceDomain.id,
-        description: "Equipment hierarchy and technical objects"
-      },
-      {
-        name: "SAP Work Center Management",
-        domainId: sapMaintenanceDomain.id,
-        description: "Production work centers and resources"
+      const capabilityIdByKey = new Map<string, BusinessCapability["id"]>();
+      for (const capability of capabilitiesSeed) {
+        const { key, parentKey, ...values } = capability;
+        const [insertedCapability] = await trx
+          .insert(businessCapabilities)
+          .values({
+            ...values,
+            parentId: parentKey ? assertKeyedLookup(capabilityIdByKey, parentKey, "business capability") : null,
+          })
+          .returning();
+        capabilityIdByKey.set(key, insertedCapability.id);
       }
-    ]).returning();
 
-    const [treasuryOperationsArea, tradeFinanceArea] = await db.insert(dataAreas).values([
-      {
-        name: "Treasury Operations",
-        domainId: financeDomain.id,
-        description: "Cash positioning, liquidity, and treasury contracts"
-      },
-      {
-        name: "Trade Finance",
-        domainId: financeDomain.id,
-        description: "Letters of credit and guarantees"
+      if (capabilityDomainMappingsSeed.length > 0) {
+        await trx.insert(capabilityDataDomainMappings).values(
+          capabilityDomainMappingsSeed.map(({ capabilityKey, domainKey, ...values }) => ({
+            ...values,
+            capabilityId: assertKeyedLookup(capabilityIdByKey, capabilityKey, "business capability"),
+            domainId: assertKeyedLookup(domainIdByKey, domainKey, "data domain"),
+          }))
+        );
       }
-    ]).returning();
 
-    // Seed Data Models
-    const [hrModel, manufacturingModel, sapManufacturingModel] = await db.insert(dataModels).values([
-      {
-        name: "HR Data Model",
-        layer: "conceptual",
-        targetSystemId: dataLakeSystem.id
-      },
-      {
-        name: "Manufacturing Operations Model",
-        layer: "conceptual",
-        targetSystemId: dataWarehouseSystem.id
-      },
-      {
-        name: "SAP Manufacturing Integration Model",
-        layer: "conceptual",
-        targetSystemId: dataWarehouseSystem.id
+      if (capabilityAreaMappingsSeed.length > 0) {
+        await trx.insert(capabilityDataAreaMappings).values(
+          capabilityAreaMappingsSeed.map(({ capabilityKey, areaKey, ...values }) => ({
+            ...values,
+            capabilityId: assertKeyedLookup(capabilityIdByKey, capabilityKey, "business capability"),
+            dataAreaId: assertKeyedLookup(areaIdByKey, areaKey, "data area"),
+          }))
+        );
       }
-    ]).returning();
 
-    const [treasuryManagementModel] = await db.insert(dataModels).values([
-      {
-        name: "Treasury Management Model",
-        layer: "conceptual",
-        targetSystemId: dataWarehouseSystem.id
+      if (capabilitySystemMappingsSeed.length > 0) {
+        await trx.insert(capabilitySystemMappings).values(
+          capabilitySystemMappingsSeed.map(({ capabilityKey, systemKey, ...values }) => ({
+            ...values,
+            capabilityId: assertKeyedLookup(capabilityIdByKey, capabilityKey, "business capability"),
+            systemId: assertKeyedLookup(systemIdByKey, systemKey, "system"),
+          }))
+        );
       }
-    ]).returning();
 
-    // Seed Data Objects
-    const [employeeObj, departmentObj, positionObj, productionOrderObj, workCenterObj, equipmentObj, qualityTestObj, inventoryItemObj, supplierObj, sapMaterialMasterObj, sapBomHeaderObj, sapBomItemObj, sapRoutingHeaderObj, sapRoutingOperationObj, sapProductionOrderHeaderObj, sapProductionOrderComponentObj, sapWorkCenterObj, sapEquipmentMasterObj, sapMaintenanceOrderObj, sapPurchaseOrderObj, sapMrpElementObj] = await db.insert(dataObjects).values([
-      {
-        name: "Employee",
-        modelId: hrModel.id,
-        domainId: hrDomain.id,
-        dataAreaId: talentArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataLakeSystem.id,
-        isNew: false,
-        position: { x: 100, y: 100 }
-      },
-      {
-        name: "Department",
-        modelId: hrModel.id,
-        domainId: hrDomain.id,
-        dataAreaId: talentArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataLakeSystem.id,
-        isNew: false,
-        position: { x: 400, y: 100 }
-      },
-      {
-        name: "Position",
-        modelId: hrModel.id,
-        domainId: hrDomain.id,
-        dataAreaId: talentArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataLakeSystem.id,
-        isNew: false,
-        position: { x: 250, y: 300 }
-      },
-      {
-        name: "Production_Order",
-        modelId: manufacturingModel.id,
-        domainId: manufacturingDomain.id,
-        dataAreaId: productionArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 150, y: 150 }
-      },
-      {
-        name: "Work_Center",
-        modelId: manufacturingModel.id,
-        domainId: manufacturingDomain.id,
-        dataAreaId: productionArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 450, y: 150 }
-      },
-      {
-        name: "Equipment",
-        modelId: manufacturingModel.id,
-        domainId: manufacturingDomain.id,
-        dataAreaId: maintenanceArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 300, y: 350 }
-      },
-      {
-        name: "Quality_Test",
-        modelId: manufacturingModel.id,
-        domainId: qualityDomain.id,
-        dataAreaId: qualityAssuranceArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 600, y: 350 }
-      },
-      {
-        name: "Inventory_Item",
-        modelId: manufacturingModel.id,
-        domainId: supplyChainDomain.id,
-        dataAreaId: inventoryArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: true,
-        position: { x: 150, y: 550 }
-      },
-      {
-        name: "Supplier",
-        modelId: manufacturingModel.id,
-        domainId: supplyChainDomain.id,
-        dataAreaId: logisticsArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 450, y: 550 }
-      },
-      // SAP Manufacturing Objects
-      {
-        name: "SAP_Material_Master",
-        modelId: sapManufacturingModel.id,
-        domainId: sapMaterialsDomain.id,
-        dataAreaId: sapMaterialMasterArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 100, y: 100 }
-      },
-      {
-        name: "SAP_BOM_Header",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapBomArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 400, y: 100 }
-      },
-      {
-        name: "SAP_BOM_Item",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapBomArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 400, y: 300 }
-      },
-      {
-        name: "SAP_Routing_Header",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapRoutingArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 700, y: 100 }
-      },
-      {
-        name: "SAP_Routing_Operation",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapRoutingArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 700, y: 300 }
-      },
-      {
-        name: "SAP_Production_Order_Header",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapProductionOrdersArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 100, y: 500 }
-      },
-      {
-        name: "SAP_Production_Order_Component",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapProductionOrdersArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 400, y: 500 }
-      },
-      {
-        name: "SAP_Work_Center",
-        modelId: sapManufacturingModel.id,
-        domainId: sapMaintenanceDomain.id,
-        dataAreaId: sapWorkCenterArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 700, y: 500 }
-      },
-      {
-        name: "SAP_Equipment_Master",
-        modelId: sapManufacturingModel.id,
-        domainId: sapMaintenanceDomain.id,
-        dataAreaId: sapEquipmentArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 100, y: 700 }
-      },
-      {
-        name: "SAP_Maintenance_Order",
-        modelId: sapManufacturingModel.id,
-        domainId: sapMaintenanceDomain.id,
-        dataAreaId: sapMaintenanceOrdersArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: true,
-        position: { x: 400, y: 700 }
-      },
-      {
-        name: "SAP_Purchase_Order",
-        modelId: sapManufacturingModel.id,
-        domainId: sapMaterialsDomain.id,
-        dataAreaId: sapPurchasingArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 700, y: 700 }
-      },
-      {
-        name: "SAP_MRP_Element",
-        modelId: sapManufacturingModel.id,
-        domainId: sapPlanningDomain.id,
-        dataAreaId: sapMrpArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: true,
-        position: { x: 1000, y: 100 }
+      if (dataModelSystemMappingsSeed.length > 0) {
+        await trx.insert(dataModelSystemMappings).values(
+          dataModelSystemMappingsSeed.map(({ modelKey, systemKey, ...values }) => ({
+            ...values,
+            modelId: assertKeyedLookup(modelIdByKey, modelKey, "data model"),
+            systemId: assertKeyedLookup(systemIdByKey, systemKey, "system"),
+          }))
+        );
       }
-    ]).returning();
 
-    const [treasuryContractObj, treasuryLoanObj, treasuryDepositObj, letterOfCreditObj, letterOfGuaranteeObj] = await db.insert(dataObjects).values([
-      {
-        name: "Treasury_Contract",
-        modelId: treasuryManagementModel.id,
-        domainId: financeDomain.id,
-        dataAreaId: treasuryOperationsArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 150, y: 160 }
-      },
-      {
-        name: "Treasury_Loan",
-        modelId: treasuryManagementModel.id,
-        domainId: financeDomain.id,
-        dataAreaId: treasuryOperationsArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: true,
-        position: { x: 420, y: 160 }
-      },
-      {
-        name: "Treasury_Deposit",
-        modelId: treasuryManagementModel.id,
-        domainId: financeDomain.id,
-        dataAreaId: treasuryOperationsArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: true,
-        position: { x: 690, y: 160 }
-      },
-      {
-        name: "Letter_of_Credit",
-        modelId: treasuryManagementModel.id,
-        domainId: financeDomain.id,
-        dataAreaId: tradeFinanceArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 300, y: 400 }
-      },
-      {
-        name: "Letter_of_Guarantee",
-        modelId: treasuryManagementModel.id,
-        domainId: financeDomain.id,
-        dataAreaId: tradeFinanceArea.id,
-        sourceSystemId: sapSystem.id,
-        targetSystemId: dataWarehouseSystem.id,
-        isNew: false,
-        position: { x: 580, y: 400 }
+      if (capabilityDataModelMappingsSeed.length > 0) {
+        await trx.insert(capabilityDataModelMappings).values(
+          capabilityDataModelMappingsSeed.map(({ capabilityKey, modelKey, domainKey, lifecyclePhaseKey, metadata, ...values }) => ({
+            ...values,
+            capabilityId: assertKeyedLookup(capabilityIdByKey, capabilityKey, "business capability"),
+            modelId: assertKeyedLookup(modelIdByKey, modelKey, "data model"),
+            domainId: domainKey ? assertKeyedLookup(domainIdByKey, domainKey, "data domain") : null,
+            lifecyclePhaseId: lifecyclePhaseKey ? assertKeyedLookup(phaseIdByKey, lifecyclePhaseKey, "lifecycle phase") : null,
+            metadata: metadata ?? null,
+          }))
+        );
       }
-    ]).returning();
 
-    // Seed Attributes
-    await db.insert(attributes).values([
-      // Employee attributes
-      {
-        name: "employee_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: employeeObj.id
-      },
-      {
-        name: "first_name",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: employeeObj.id
-      },
-      {
-        name: "last_name",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: employeeObj.id
-      },
-      {
-        name: "email",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: employeeObj.id
-      },
-      {
-        name: "department_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: employeeObj.id
-      },
-      // Department attributes
-      {
-        name: "department_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: departmentObj.id
-      },
-      {
-        name: "department_name",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: departmentObj.id
-      },
-      {
-        name: "manager_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: false,
-        isForeignKey: true,
-        objectId: departmentObj.id
-      },
-      // Position attributes
-      {
-        name: "position_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: positionObj.id
-      },
-      {
-        name: "position_title",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: positionObj.id
-      },
-      {
-        name: "salary_range_min",
-        dataType: "DECIMAL(10,2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: positionObj.id
-      },
-      {
-        name: "salary_range_max",
-        dataType: "DECIMAL(10,2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: positionObj.id
-      },
-      // Production Order attributes
-      {
-        name: "order_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "product_code",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "quantity_planned",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "quantity_produced",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "start_date",
-        dataType: "DATETIME",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "end_date",
-        dataType: "DATETIME",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: productionOrderObj.id
-      },
-      {
-        name: "work_center_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: productionOrderObj.id
-      },
-      // Work Center attributes
-      {
-        name: "work_center_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: workCenterObj.id
-      },
-      {
-        name: "work_center_name",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: workCenterObj.id
-      },
-      {
-        name: "capacity_per_hour",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: workCenterObj.id
-      },
-      {
-        name: "status",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: workCenterObj.id
-      },
-      // Equipment attributes
-      {
-        name: "equipment_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: equipmentObj.id
-      },
-      {
-        name: "equipment_name",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: equipmentObj.id
-      },
-      {
-        name: "serial_number",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: equipmentObj.id
-      },
-      {
-        name: "last_maintenance_date",
-        dataType: "DATETIME",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: equipmentObj.id
-      },
-      {
-        name: "next_maintenance_date",
-        dataType: "DATETIME",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: equipmentObj.id
-      },
-      {
-        name: "work_center_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: equipmentObj.id
-      },
-      // Quality Test attributes
-      {
-        name: "test_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: qualityTestObj.id
-      },
-      {
-        name: "order_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: qualityTestObj.id
-      },
-      {
-        name: "test_type",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: qualityTestObj.id
-      },
-      {
-        name: "test_result",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: qualityTestObj.id
-      },
-      {
-        name: "test_date",
-        dataType: "DATETIME",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: qualityTestObj.id
-      },
-      {
-        name: "defect_count",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: qualityTestObj.id
-      },
-      // Inventory Item attributes
-      {
-        name: "item_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "item_code",
-        dataType: "VARCHAR(50)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "item_description",
-        dataType: "VARCHAR(200)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "current_stock",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "reorder_level",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "unit_cost",
-        dataType: "DECIMAL(10,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: inventoryItemObj.id
-      },
-      {
-        name: "supplier_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: inventoryItemObj.id
-      },
-      // Supplier attributes
-      {
-        name: "supplier_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: supplierObj.id
-      },
-      {
-        name: "supplier_name",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: supplierObj.id
-      },
-      {
-        name: "contact_email",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: supplierObj.id
-      },
-      {
-        name: "phone_number",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: supplierObj.id
-      },
-      {
-        name: "rating",
-        dataType: "DECIMAL(3,2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: supplierObj.id
-      },
-      // SAP Material Master attributes
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "material_type",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "material_description",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "base_unit_of_measure",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "material_group",
-        dataType: "VARCHAR(9)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "mrp_type",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaterialMasterObj.id
-      },
-      {
-        name: "lot_size",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaterialMasterObj.id
-      },
-      // SAP BOM Header attributes
-      {
-        name: "bom_number",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "bom_usage",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "alternative_bom",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "valid_from_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomHeaderObj.id
-      },
-      {
-        name: "base_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomHeaderObj.id
-      },
-      // SAP BOM Item attributes
-      {
-        name: "bom_number",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapBomItemObj.id
-      },
-      {
-        name: "item_number",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapBomItemObj.id
-      },
-      {
-        name: "component_material",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapBomItemObj.id
-      },
-      {
-        name: "component_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomItemObj.id
-      },
-      {
-        name: "unit_of_measure",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapBomItemObj.id
-      },
-      {
-        name: "item_category",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapBomItemObj.id
-      },
-      // SAP Routing Header attributes
-      {
-        name: "routing_number",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "routing_usage",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "routing_status",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "lot_size_from",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingHeaderObj.id
-      },
-      {
-        name: "lot_size_to",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingHeaderObj.id
-      },
-      // SAP Routing Operation attributes
-      {
-        name: "routing_number",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "operation_number",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "work_center",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "operation_description",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "setup_time",
-        dataType: "DECIMAL(9,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "machine_time",
-        dataType: "DECIMAL(9,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingOperationObj.id
-      },
-      {
-        name: "labor_time",
-        dataType: "DECIMAL(9,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapRoutingOperationObj.id
-      },
-      // SAP Production Order Header attributes
-      {
-        name: "production_order",
-        dataType: "VARCHAR(10)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "order_type",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "order_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "confirmed_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "system_status",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "basic_start_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      {
-        name: "basic_finish_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderHeaderObj.id
-      },
-      // SAP Production Order Component attributes
-      {
-        name: "production_order",
-        dataType: "VARCHAR(10)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "item_number",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "required_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "withdrawn_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "requirement_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      {
-        name: "storage_location",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapProductionOrderComponentObj.id
-      },
-      // SAP Work Center attributes
-      {
-        name: "work_center",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "work_center_category",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "description",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "capacity_category",
-        dataType: "VARCHAR(8)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "available_capacity",
-        dataType: "DECIMAL(9,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapWorkCenterObj.id
-      },
-      {
-        name: "capacity_unit",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapWorkCenterObj.id
-      },
-      // SAP Equipment Master attributes
-      {
-        name: "equipment_number",
-        dataType: "VARCHAR(18)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "description",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "equipment_category",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "technical_object_type",
-        dataType: "VARCHAR(10)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "superior_equipment",
-        dataType: "VARCHAR(18)",
-        isPrimaryKey: false,
-        isRequired: false,
-        isForeignKey: true,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "functional_location",
-        dataType: "VARCHAR(30)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "manufacturer",
-        dataType: "VARCHAR(30)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "model_number",
-        dataType: "VARCHAR(18)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      {
-        name: "serial_number",
-        dataType: "VARCHAR(18)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapEquipmentMasterObj.id
-      },
-      // SAP Maintenance Order attributes
-      {
-        name: "maintenance_order",
-        dataType: "VARCHAR(12)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "order_type",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "equipment_number",
-        dataType: "VARCHAR(18)",
-        isPrimaryKey: false,
-        isRequired: false,
-        isForeignKey: true,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "functional_location",
-        dataType: "VARCHAR(30)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "description",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "priority",
-        dataType: "VARCHAR(1)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "basic_start_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "basic_finish_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      {
-        name: "system_status",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMaintenanceOrderObj.id
-      },
-      // SAP Purchase Order attributes
-      {
-        name: "purchase_order",
-        dataType: "VARCHAR(10)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "item_number",
-        dataType: "VARCHAR(5)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: false,
-        isForeignKey: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "vendor",
-        dataType: "VARCHAR(10)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "order_quantity",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "delivery_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapPurchaseOrderObj.id
-      },
-      {
-        name: "net_price",
-        dataType: "DECIMAL(11,2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapPurchaseOrderObj.id
-      },
-      // SAP MRP Element attributes
-      {
-        name: "mrp_element",
-        dataType: "VARCHAR(12)",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "material_number",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "plant",
-        dataType: "VARCHAR(4)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "mrp_element_data",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "exception_message",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "receipt_qty",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "requirement_qty",
-        dataType: "DECIMAL(13,3)",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: sapMrpElementObj.id
-      },
-      {
-        name: "mrp_element_category",
-        dataType: "VARCHAR(2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: sapMrpElementObj.id
+      if (capabilityModelSystemMappingsSeed.length > 0) {
+        await trx.insert(capabilityModelSystemMappings).values(
+          capabilityModelSystemMappingsSeed.map(({ capabilityKey, modelKey, systemKey, ...values }) => ({
+            ...values,
+            capabilityId: assertKeyedLookup(capabilityIdByKey, capabilityKey, "business capability"),
+            modelId: assertKeyedLookup(modelIdByKey, modelKey, "data model"),
+            systemId: assertKeyedLookup(systemIdByKey, systemKey, "system"),
+          }))
+        );
       }
-    ]);
 
-    await db.insert(attributes).values([
-      // Treasury Contract attributes
-      {
-        name: "contract_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "contract_number",
-        dataType: "VARCHAR(30)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "contract_type",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "counterparty",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "effective_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "maturity_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "currency",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "notional_amount",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      {
-        name: "status",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryContractObj.id
-      },
-      // Treasury Loan attributes
-      {
-        name: "loan_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "contract_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "loan_type",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "principal_amount",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "interest_rate",
-        dataType: "DECIMAL(5,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "start_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "end_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: treasuryLoanObj.id
-      },
-      {
-        name: "current_balance",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryLoanObj.id
-      },
-      // Treasury Deposit attributes
-      {
-        name: "deposit_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "contract_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "deposit_type",
-        dataType: "VARCHAR(40)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "amount",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "interest_rate",
-        dataType: "DECIMAL(5,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "start_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "maturity_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: treasuryDepositObj.id
-      },
-      {
-        name: "status",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: treasuryDepositObj.id
-      },
-      // Letter of Credit attributes
-      {
-        name: "lc_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "contract_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "applicant",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "beneficiary",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "issue_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "expiry_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "currency",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "amount",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      {
-        name: "status",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfCreditObj.id
-      },
-      // Letter of Guarantee attributes
-      {
-        name: "lg_id",
-        dataType: "INTEGER",
-        isPrimaryKey: true,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "contract_id",
-        dataType: "INTEGER",
-        isPrimaryKey: false,
-        isRequired: true,
-        isForeignKey: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "applicant",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "beneficiary",
-        dataType: "VARCHAR(100)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "issue_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "expiry_date",
-        dataType: "DATE",
-        isPrimaryKey: false,
-        isRequired: false,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "currency",
-        dataType: "VARCHAR(3)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "amount",
-        dataType: "DECIMAL(18,2)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
-      },
-      {
-        name: "status",
-        dataType: "VARCHAR(20)",
-        isPrimaryKey: false,
-        isRequired: true,
-        objectId: letterOfGuaranteeObj.id
+      if (modelLifecycleAssignmentsSeed.length > 0) {
+        await trx.insert(modelLifecycleAssignments).values(
+          modelLifecycleAssignmentsSeed.map(({ modelKey, phaseKey, ...values }) => ({
+            ...values,
+            modelId: assertKeyedLookup(modelIdByKey, modelKey, "data model"),
+            phaseId: assertKeyedLookup(phaseIdByKey, phaseKey, "lifecycle phase"),
+          }))
+        );
       }
-    ]);
 
-    // Seed Relationships
-    await db.insert(relationships).values([
-      {
-        sourceObjectId: employeeObj.id,
-        targetObjectId: departmentObj.id,
-        type: "N:1",
-        sourceAttributeName: "department_id",
-        targetAttributeName: "department_id",
-        modelId: hrModel.id
-      },
-      {
-        sourceObjectId: departmentObj.id,
-        targetObjectId: employeeObj.id,
-        type: "1:1",
-        sourceAttributeName: "manager_id",
-        targetAttributeName: "employee_id",
-        modelId: hrModel.id
-      },
-      {
-        sourceObjectId: productionOrderObj.id,
-        targetObjectId: workCenterObj.id,
-        type: "N:1",
-        sourceAttributeName: "work_center_id",
-        targetAttributeName: "work_center_id",
-        modelId: manufacturingModel.id
-      },
-      {
-        sourceObjectId: equipmentObj.id,
-        targetObjectId: workCenterObj.id,
-        type: "N:1",
-        sourceAttributeName: "work_center_id",
-        targetAttributeName: "work_center_id",
-        modelId: manufacturingModel.id
-      },
-      {
-        sourceObjectId: qualityTestObj.id,
-        targetObjectId: productionOrderObj.id,
-        type: "N:1",
-        sourceAttributeName: "order_id",
-        targetAttributeName: "order_id",
-        modelId: manufacturingModel.id
-      },
-      {
-        sourceObjectId: inventoryItemObj.id,
-        targetObjectId: supplierObj.id,
-        type: "N:1",
-        sourceAttributeName: "supplier_id",
-        targetAttributeName: "supplier_id",
-        modelId: manufacturingModel.id
-      },
-      // SAP Manufacturing Relationships
-      {
-        sourceObjectId: sapBomHeaderObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapBomItemObj.id,
-        targetObjectId: sapBomHeaderObj.id,
-        type: "N:1",
-        sourceAttributeName: "bom_number",
-        targetAttributeName: "bom_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapBomItemObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "component_material",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapRoutingHeaderObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapRoutingOperationObj.id,
-        targetObjectId: sapRoutingHeaderObj.id,
-        type: "N:1",
-        sourceAttributeName: "routing_number",
-        targetAttributeName: "routing_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapRoutingOperationObj.id,
-        targetObjectId: sapWorkCenterObj.id,
-        type: "N:1",
-        sourceAttributeName: "work_center",
-        targetAttributeName: "work_center",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapProductionOrderHeaderObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapProductionOrderComponentObj.id,
-        targetObjectId: sapProductionOrderHeaderObj.id,
-        type: "N:1",
-        sourceAttributeName: "production_order",
-        targetAttributeName: "production_order",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapProductionOrderComponentObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapMaintenanceOrderObj.id,
-        targetObjectId: sapEquipmentMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "equipment_number",
-        targetAttributeName: "equipment_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapPurchaseOrderObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapMrpElementObj.id,
-        targetObjectId: sapMaterialMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "material_number",
-        targetAttributeName: "material_number",
-        modelId: sapManufacturingModel.id
-      },
-      {
-        sourceObjectId: sapEquipmentMasterObj.id,
-        targetObjectId: sapEquipmentMasterObj.id,
-        type: "N:1",
-        sourceAttributeName: "superior_equipment",
-        targetAttributeName: "equipment_number",
-        modelId: sapManufacturingModel.id
-      }
-    ]);
+      await trx.insert(configurations).values([
+        {
+          category: "governance",
+          key: "manufacturing_bcm_framework",
+          value: {
+            name: "Manufacturing BCM Starter",
+            version: "2024.1",
+            lastUpdated: new Date().toISOString(),
+            lifecyclePhases: lifecyclePhasesSeed.map((phase) => phase.key),
+          },
+          description: "Active manufacturing business capability model with governance context",
+        },
+      ]);
+    });
 
-    await db.insert(relationships).values([
-      {
-        sourceObjectId: treasuryLoanObj.id,
-        targetObjectId: treasuryContractObj.id,
-        type: "N:1",
-        sourceAttributeName: "contract_id",
-        targetAttributeName: "contract_id",
-        modelId: treasuryManagementModel.id
-      },
-      {
-        sourceObjectId: treasuryDepositObj.id,
-        targetObjectId: treasuryContractObj.id,
-        type: "N:1",
-        sourceAttributeName: "contract_id",
-        targetAttributeName: "contract_id",
-        modelId: treasuryManagementModel.id
-      },
-      {
-        sourceObjectId: letterOfCreditObj.id,
-        targetObjectId: treasuryContractObj.id,
-        type: "N:1",
-        sourceAttributeName: "contract_id",
-        targetAttributeName: "contract_id",
-        modelId: treasuryManagementModel.id
-      },
-      {
-        sourceObjectId: letterOfGuaranteeObj.id,
-        targetObjectId: treasuryContractObj.id,
-        type: "N:1",
-        sourceAttributeName: "contract_id",
-        targetAttributeName: "contract_id",
-        modelId: treasuryManagementModel.id
-      }
-    ]);
-
-    // Data Sources section removed - table not defined in schema
-
-    // Seed Initial Configuration
-    await db.insert(configurations).values([
-      {
-        category: "ai",
-        key: "openai_model",
-        value: "gpt-4o",
-        description: "Default OpenAI model for AI suggestions"
-      },
-      {
-        category: "ai",
-        key: "temperature",
-        value: 0.7,
-        description: "AI response creativity level"
-      },
-      {
-        category: "ui",
-        key: "theme",
-        value: "dark",
-        description: "Default UI theme"
-      },
-      {
-        category: "ui",
-        key: "auto_save",
-        value: true,
-        description: "Enable automatic saving"
-      },
-      {
-        category: "export",
-        key: "default_format",
-        value: "json",
-        description: "Default export format"
-      }
-    ]);
-
-    console.log("✅ Database seeding completed successfully!");
+    console.log("✅ Database seeding complete.");
   } catch (error) {
-    console.error("❌ Error seeding database:", error);
+    console.error("❌ Database seeding failed", error);
     throw error;
   }
 }
 
-// Run seeding if called directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   seedDatabase()
     .then(() => process.exit(0))

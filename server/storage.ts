@@ -10,6 +10,10 @@ import {
   relationships,
   systems,
   configurations,
+  businessCapabilities,
+  capabilityDataDomainMappings,
+  capabilityDataAreaMappings,
+  capabilitySystemMappings,
   type DataModel,
   type InsertDataModel,
   type DataDomain,
@@ -32,6 +36,14 @@ import {
   type InsertSystem,
   type Configuration,
   type InsertConfiguration,
+  type BusinessCapability,
+  type InsertBusinessCapability,
+  type CapabilityDataDomainMapping,
+  type InsertCapabilityDataDomainMapping,
+  type CapabilityDataAreaMapping,
+  type InsertCapabilityDataAreaMapping,
+  type CapabilitySystemMapping,
+  type InsertCapabilitySystemMapping,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -121,6 +133,20 @@ export interface IStorage {
   createConfiguration(config: InsertConfiguration): Promise<Configuration>;
   updateConfiguration(id: number, config: Partial<InsertConfiguration>): Promise<Configuration>;
   deleteConfiguration(id: number): Promise<void>;
+
+  // Business Capabilities
+  getBusinessCapabilities(): Promise<BusinessCapability[]>;
+  getBusinessCapability(id: number): Promise<BusinessCapability | undefined>;
+  getBusinessCapabilityTree(): Promise<any>;
+  getCapabilityMappings(capabilityId: number): Promise<any>;
+  createBusinessCapability(capability: InsertBusinessCapability): Promise<BusinessCapability>;
+  updateBusinessCapability(id: number, capability: Partial<InsertBusinessCapability>): Promise<BusinessCapability>;
+  deleteBusinessCapability(id: number): Promise<void>;
+  
+  // Capability Mappings
+  createCapabilityDomainMapping(mapping: InsertCapabilityDataDomainMapping): Promise<CapabilityDataDomainMapping>;
+  createCapabilityDataAreaMapping(mapping: InsertCapabilityDataAreaMapping): Promise<CapabilityDataAreaMapping>;
+  createCapabilitySystemMapping(mapping: InsertCapabilitySystemMapping): Promise<CapabilitySystemMapping>;
 }
 
 export class Storage implements IStorage {
@@ -444,6 +470,124 @@ export class Storage implements IStorage {
 
   async deleteConfiguration(id: number): Promise<void> {
     await db.delete(configurations).where(eq(configurations.id, id));
+  }
+
+  // Business Capabilities
+  async getBusinessCapabilities(): Promise<BusinessCapability[]> {
+    return await db.select().from(businessCapabilities);
+  }
+
+  async getBusinessCapability(id: number): Promise<BusinessCapability | undefined> {
+    const result = await db.select().from(businessCapabilities).where(eq(businessCapabilities.id, id));
+    return result[0];
+  }
+
+  async getBusinessCapabilityTree(): Promise<any> {
+    const capabilities = await db.select().from(businessCapabilities);
+    
+    // Build hierarchical tree structure
+    const buildTree = (parentId: number | null = null): any[] => {
+      return capabilities
+        .filter((cap: BusinessCapability) => cap.parentId === parentId)
+        .sort((a: BusinessCapability, b: BusinessCapability) => (a.sortOrder || 0) - (b.sortOrder || 0))
+        .map((cap: BusinessCapability) => ({
+          ...cap,
+          children: buildTree(cap.id)
+        }));
+    };
+    
+    return buildTree();
+  }
+
+  async getCapabilityMappings(capabilityId: number): Promise<any> {
+    const [domainMappings, datAreaMappings, systemMappings] = await Promise.all([
+      db.select({
+        id: capabilityDataDomainMappings.id,
+        mappingType: capabilityDataDomainMappings.mappingType,
+        importance: capabilityDataDomainMappings.importance,
+        description: capabilityDataDomainMappings.description,
+        domain: {
+          id: dataDomains.id,
+          name: dataDomains.name,
+          description: dataDomains.description,
+          colorCode: dataDomains.colorCode,
+        }
+      })
+      .from(capabilityDataDomainMappings)
+      .leftJoin(dataDomains, eq(capabilityDataDomainMappings.domainId, dataDomains.id))
+      .where(eq(capabilityDataDomainMappings.capabilityId, capabilityId)),
+
+      db.select({
+        id: capabilityDataAreaMappings.id,
+        mappingType: capabilityDataAreaMappings.mappingType,
+        importance: capabilityDataAreaMappings.importance,
+        description: capabilityDataAreaMappings.description,
+        dataArea: {
+          id: dataAreas.id,
+          name: dataAreas.name,
+          description: dataAreas.description,
+          colorCode: dataAreas.colorCode,
+        }
+      })
+      .from(capabilityDataAreaMappings)
+      .leftJoin(dataAreas, eq(capabilityDataAreaMappings.dataAreaId, dataAreas.id))
+      .where(eq(capabilityDataAreaMappings.capabilityId, capabilityId)),
+
+      db.select({
+        id: capabilitySystemMappings.id,
+        mappingType: capabilitySystemMappings.mappingType,
+        systemRole: capabilitySystemMappings.systemRole,
+        coverage: capabilitySystemMappings.coverage,
+        description: capabilitySystemMappings.description,
+        system: {
+          id: systems.id,
+          name: systems.name,
+          category: systems.category,
+          type: systems.type,
+          description: systems.description,
+          colorCode: systems.colorCode,
+        }
+      })
+      .from(capabilitySystemMappings)
+      .leftJoin(systems, eq(capabilitySystemMappings.systemId, systems.id))
+      .where(eq(capabilitySystemMappings.capabilityId, capabilityId))
+    ]);
+
+    return {
+      domains: domainMappings,
+      dataAreas: datAreaMappings,
+      systems: systemMappings,
+    };
+  }
+
+  async createBusinessCapability(capability: InsertBusinessCapability): Promise<BusinessCapability> {
+    const result = await db.insert(businessCapabilities).values(capability).returning();
+    return result[0];
+  }
+
+  async updateBusinessCapability(id: number, capability: Partial<InsertBusinessCapability>): Promise<BusinessCapability> {
+    const result = await db.update(businessCapabilities).set(capability).where(eq(businessCapabilities.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteBusinessCapability(id: number): Promise<void> {
+    await db.delete(businessCapabilities).where(eq(businessCapabilities.id, id));
+  }
+
+  // Capability Mappings
+  async createCapabilityDomainMapping(mapping: InsertCapabilityDataDomainMapping): Promise<CapabilityDataDomainMapping> {
+    const result = await db.insert(capabilityDataDomainMappings).values(mapping).returning();
+    return result[0];
+  }
+
+  async createCapabilityDataAreaMapping(mapping: InsertCapabilityDataAreaMapping): Promise<CapabilityDataAreaMapping> {
+    const result = await db.insert(capabilityDataAreaMappings).values(mapping).returning();
+    return result[0];
+  }
+
+  async createCapabilitySystemMapping(mapping: InsertCapabilitySystemMapping): Promise<CapabilitySystemMapping> {
+    const result = await db.insert(capabilitySystemMappings).values(mapping).returning();
+    return result[0];
   }
 }
 

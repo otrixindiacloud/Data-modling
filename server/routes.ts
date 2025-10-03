@@ -2359,6 +2359,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Business Capabilities
+  app.get("/api/capabilities", async (req, res) => {
+    try {
+      const capabilities = await storage.getBusinessCapabilities();
+      res.json(capabilities);
+    } catch (error) {
+      console.error("Failed to fetch capabilities:", error);
+      res.status(500).json({ message: "Failed to fetch capabilities" });
+    }
+  });
+
+  app.get("/api/capabilities/tree", async (req, res) => {
+    try {
+      const capabilityTree = await storage.getBusinessCapabilityTree();
+      res.json(capabilityTree);
+    } catch (error) {
+      console.error("Failed to fetch capability tree:", error);
+      res.status(500).json({ message: "Failed to fetch capability tree" });
+    }
+  });
+
+  app.get("/api/capabilities/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const capability = await storage.getBusinessCapability(id);
+      if (!capability) {
+        return res.status(404).json({ message: "Capability not found" });
+      }
+      res.json(capability);
+    } catch (error) {
+      console.error("Failed to fetch capability:", error);
+      res.status(500).json({ message: "Failed to fetch capability" });
+    }
+  });
+
+  app.get("/api/capabilities/:id/mappings", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const mappings = await storage.getCapabilityMappings(id);
+      res.json(mappings);
+    } catch (error) {
+      console.error("Failed to fetch capability mappings:", error);
+      res.status(500).json({ message: "Failed to fetch capability mappings" });
+    }
+  });
+
+  app.post("/api/capabilities", async (req, res) => {
+    try {
+      const capability = await storage.createBusinessCapability(req.body);
+      res.status(201).json(capability);
+    } catch (error) {
+      console.error("Failed to create capability:", error);
+      res.status(500).json({ message: "Failed to create capability" });
+    }
+  });
+
+  app.patch("/api/capabilities/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const capability = await storage.updateBusinessCapability(id, req.body);
+      res.json(capability);
+    } catch (error) {
+      console.error("Failed to update capability:", error);
+      res.status(500).json({ message: "Failed to update capability" });
+    }
+  });
+
+  app.delete("/api/capabilities/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteBusinessCapability(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete capability:", error);
+      res.status(500).json({ message: "Failed to delete capability" });
+    }
+  });
+
+  // Capability-Domain Mappings
+  app.post("/api/capabilities/:capabilityId/domains/:domainId", async (req, res) => {
+    try {
+      const capabilityId = parseInt(req.params.capabilityId);
+      const domainId = parseInt(req.params.domainId);
+      const mapping = await storage.createCapabilityDomainMapping({
+        capabilityId,
+        domainId,
+        ...req.body
+      });
+      res.status(201).json(mapping);
+    } catch (error) {
+      console.error("Failed to create capability-domain mapping:", error);
+      res.status(500).json({ message: "Failed to create mapping" });
+    }
+  });
+
+  // Capability-DataArea Mappings
+  app.post("/api/capabilities/:capabilityId/data-areas/:dataAreaId", async (req, res) => {
+    try {
+      const capabilityId = parseInt(req.params.capabilityId);
+      const dataAreaId = parseInt(req.params.dataAreaId);
+      const mapping = await storage.createCapabilityDataAreaMapping({
+        capabilityId,
+        dataAreaId,
+        ...req.body
+      });
+      res.status(201).json(mapping);
+    } catch (error) {
+      console.error("Failed to create capability-data area mapping:", error);
+      res.status(500).json({ message: "Failed to create mapping" });
+    }
+  });
+
+  // Capability-System Mappings
+  app.post("/api/capabilities/:capabilityId/systems/:systemId", async (req, res) => {
+    try {
+      const capabilityId = parseInt(req.params.capabilityId);
+      const systemId = parseInt(req.params.systemId);
+      const mapping = await storage.createCapabilitySystemMapping({
+        capabilityId,
+        systemId,
+        ...req.body
+      });
+      res.status(201).json(mapping);
+    } catch (error) {
+      console.error("Failed to create capability-system mapping:", error);
+      res.status(500).json({ message: "Failed to create mapping" });
+    }
+  });
+
   // AI Suggestions
   app.post("/api/ai/modeling-agent", async (req, res) => {
     try {

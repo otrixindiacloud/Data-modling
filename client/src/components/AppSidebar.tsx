@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Home, Layers3, Server, Settings, BarChart3 } from "lucide-react";
+import { Home, Layers3, Server, Settings, BarChart3, Building2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -27,6 +27,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Model List",
     href: "/models",
     icon: Layers3,
+  },
+  {
+    label: "Business Capabilities",
+    href: "/capabilities",
+    icon: Building2,
+    description: "Business capability map"
   },
   {
     label: "Systems",

@@ -19,6 +19,7 @@ import {
 import ColorThemePage from "@/pages/ColorThemePage";
 import SystemsManagementPage from "@/pages/SystemsManagementPage";
 import ReportsPage from "@/pages/ReportsPage";
+import { BusinessCapabilityMapPage } from "@/pages/BusinessCapabilityMapPage";
 
 function RedirectToConfiguration() {
   const [, setLocation] = useLocation();
@@ -48,6 +49,7 @@ function App() {
               <Route path="/configuration" component={ConfigurationPage} />
               <Route path="/systems" component={SystemsManagementPage} />
               <Route path="/reports" component={ReportsPage} />
+              <Route path="/capabilities" component={BusinessCapabilityMapPage} />
               <Route path="/enhanced-config" component={RedirectToConfiguration} />
               <Route path="/color-themes" component={ColorThemePage} />
               <Route component={NotFound} />
