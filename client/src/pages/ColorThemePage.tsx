@@ -66,7 +66,6 @@ export default function ColorThemePage() {
             <Link href="/modeler">
               <Button variant="outline" size="sm" className="flex items-center gap-2">
                 <ArrowLeft className="w-4 h-4" />
-                Back to Modeler
               </Button>
             </Link>
             <div>

@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { aiEngine } from "./services/aiEngine";
 import { dataConnectors, type ADLSConnectionConfig, type DatabaseConnectionConfig, type TableMetadata } from "./services/dataConnectors";
 import { exportService } from "./services/exportService";
+import { modelingAgentService } from "./services/modelingAgent";
 
 // Helper functions for data type conversion
 function mapLogicalToPhysicalType(logicalType: string | null): string {
@@ -127,6 +128,22 @@ const systemSyncRequestSchema = z.object({
   dataAreaId: z.number().int().positive().nullable().optional(),
   metadataOnly: z.boolean().default(false).optional(),
 });
+
+const modelingAgentRequestSchema = z
+  .object({
+    rootModelId: z.number().int().positive().optional(),
+    modelName: z.string().min(1).optional(),
+    businessDescription: z.string().min(1),
+    instructions: z.string().min(1),
+    targetDatabase: z.string().min(1).optional(),
+    sqlPlatforms: z.array(z.string().min(1)).optional(),
+    allowDrop: z.boolean().optional(),
+    generateSql: z.boolean().optional(),
+  })
+  .refine((data) => Boolean(data.rootModelId) || Boolean(data.modelName), {
+    message: "Provide either rootModelId or modelName",
+    path: ["rootModelId"],
+  });
 
 type SystemObjectDirection = "source" | "target";
 
@@ -2343,6 +2360,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AI Suggestions
+  app.post("/api/ai/modeling-agent", async (req, res) => {
+    try {
+      const payload = modelingAgentRequestSchema.parse(req.body);
+      const result = await modelingAgentService.run(payload);
+      res.json(result);
+    } catch (error: any) {
+      console.error("AI modeling agent error:", error);
+      if (error.name === "ZodError") {
+        res.status(400).json({
+          message: "Invalid modeling agent request",
+          details: error.errors,
+          errors: error.errors,
+        });
+      } else {
+        res.status(500).json({
+          message: error?.message ?? "Failed to execute modeling agent",
+        });
+      }
+    }
+  });
+
   app.post("/api/ai/suggest-domain", async (req, res) => {
     try {
       const { objectName, attributes } = req.body;

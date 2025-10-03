@@ -149,7 +149,6 @@ function SystemEditorPage({ mode, title, description, systemId }: SystemEditorPa
             className="mr-2"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Configuration
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{title}</h1>

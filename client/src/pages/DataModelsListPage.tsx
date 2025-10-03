@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Layers3, Database, MapPin, ArrowRight, RefreshCw } from "lucide-react";
+import { Plus, Layers3, Database, MapPin, ArrowRight, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import TopNavBar from "@/components/TopNavBar";
 import AddDataModelModal from "@/components/modals/AddDataModelModal";
+import { ModelingAgentPanel } from "@/components/ModelingAgentPanel";
 import { useModelerStore } from "@/store/modelerStore";
 import type { DataModel, DataDomain, DataArea, System } from "@shared/schema";
 
@@ -30,6 +31,7 @@ const fetchJson = async <T,>(url: string): Promise<T> => {
 export default function DataModelsListPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
   const [, setLocation] = useLocation();
   const { setCurrentModel } = useModelerStore();
 
@@ -122,6 +124,12 @@ export default function DataModelsListPage() {
   };
 
   const handleCreateModel = () => {
+    setIsAddModalOpen(false);
+    setIsAgentPanelOpen(true);
+  };
+
+  const handleManualCreate = () => {
+    setIsAgentPanelOpen(false);
     setIsAddModalOpen(true);
   };
 
@@ -167,10 +175,16 @@ export default function DataModelsListPage() {
               <RefreshCw className={cn("h-4 w-4", modelsLoading && "animate-spin")} />
               Refresh
             </Button>
-            <Button onClick={handleCreateModel} className="flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              New Data Model
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={handleManualCreate} className="flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Manual Model
+              </Button>
+              <Button onClick={handleCreateModel} className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                AI-Assisted Model
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -232,10 +246,16 @@ export default function DataModelsListPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={handleCreateModel} className="flex items-center gap-2">
-                <Plus className="h-4 w-4" />
-                Create data model
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={handleManualCreate} className="flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Manual model
+                </Button>
+                <Button onClick={handleCreateModel} className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  AI-assisted model
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ) : (
@@ -313,6 +333,9 @@ export default function DataModelsListPage() {
       </div>
 
       <AddDataModelModal open={isAddModalOpen} onOpenChange={setIsAddModalOpen} />
+      {isAgentPanelOpen ? (
+        <ModelingAgentPanel open={isAgentPanelOpen} onOpenChange={setIsAgentPanelOpen} />
+      ) : null}
     </div>
   );
 }

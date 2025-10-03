@@ -282,7 +282,6 @@ export default function EnhancedConfigurationPage() {
             onClick={() => setLocation("/configuration")}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Configuration
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Enhanced Configuration</h1>
@@ -298,7 +297,6 @@ export default function EnhancedConfigurationPage() {
             onClick={() => setLocation("/modeler")}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Modeler
           </Button>
         </div>
       </div>

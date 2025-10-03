@@ -525,7 +525,6 @@ export default function SystemsManagementPage() {
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={() => setLocation("/configuration")}>
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Configuration
             </Button>
             <div>
               <h1 className="text-2xl font-bold">System Management</h1>

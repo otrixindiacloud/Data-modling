@@ -313,7 +313,6 @@ export default function ConfigurationPage() {
             className="mr-2"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Modeler
           </Button>
           <Settings className="h-6 w-6" />
           <h1 className="text-2xl font-bold">Configuration</h1>

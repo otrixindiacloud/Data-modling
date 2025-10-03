@@ -723,7 +723,7 @@ export default function DataObjectExplorer({
   );
 
   return (
-    <div className="w-80 h-full bg-sidebar border-r border-sidebar-border flex flex-col">
+    <div className="h-full bg-sidebar border-r border-sidebar-border flex flex-col w-full min-w-[18rem] max-w-full">
       <div className="p-3 border-b border-sidebar-border bg-sidebar-header">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -820,40 +820,6 @@ export default function DataObjectExplorer({
               </div>
 
               <div className="grid grid-cols-1 gap-2">
-                <Select
-                  value={selectedDomain}
-                  onValueChange={(value) => {
-                    setSelectedDomain(value);
-                    setSelectedDataArea("all");
-                  }}
-                >
-                  <SelectTrigger className="h-8 text-xs" data-testid="select-domain-filter">
-                    <SelectValue placeholder="All Domains" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Domains</SelectItem>
-                    {domains.map((domain: DataDomain) => (
-                      <SelectItem key={domain.id} value={domain.id.toString()}>
-                        {domain.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={selectedDataArea} onValueChange={setSelectedDataArea}>
-                  <SelectTrigger className="h-8 text-xs" data-testid="select-data-area-filter">
-                    <SelectValue placeholder="All Data Areas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Data Areas</SelectItem>
-                    {availableDataAreas.map((area: DataArea) => (
-                      <SelectItem key={area.id} value={area.id.toString()}>
-                        {area.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
                 <Select value={selectedSystem} onValueChange={setSelectedSystem}>
                   <SelectTrigger className="h-8 text-xs" data-testid="select-system-filter">
                     <SelectValue placeholder="All Systems" />
