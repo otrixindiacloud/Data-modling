@@ -1461,67 +1461,10 @@ export const BusinessCapabilityMap: React.FC = () => {
           </Card>
         </div>
 
-        <div className="flex flex-col gap-4 2xl:flex-row">
-          <div className="2xl:w-80 flex flex-col gap-4">
-            <Card className="h-[520px]">
-              <CardHeader className="pb-0">
-                <CardTitle className="flex items-center">
-                  <Building2 className="h-5 w-5 mr-2" />
-                  Capability Hierarchy
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <ScrollArea className="h-[460px]">
-                  <div className="p-4 space-y-1">
-                    {capabilityTree.map((capability) => (
-                      <CapabilityNode
-                        key={capability.id}
-                        capability={capability}
-                        selectedCapability={selectedCapability}
-                        onSelectCapability={setSelectedCapability}
-                        level={0}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+        <div className="flex flex-col gap-4">
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-sm font-semibold">
-                  <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
-                  Top Investment Opportunities
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {topOpportunities.map((metric) => (
-                  <button
-                    key={metric.id}
-                    onClick={() => handleSelectCapability(metric.id)}
-                    className="w-full text-left rounded-md border p-3 transition hover:border-primary hover:bg-muted"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{metric.capability.name}</span>
-                      <Badge variant="outline">{roadmapLabels[metric.horizon].split(" ")[0]}</Badge>
-                    </div>
-                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Maturity: {metric.maturityScore.toFixed(1)}/5</span>
-                      <span>Priority: {metric.priorityScore.toFixed(1)}</span>
-                    </div>
-                  </button>
-                ))}
-                {!topOpportunities.length && (
-                  <p className="text-xs text-muted-foreground">
-                    Capabilities will appear here once data is available.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="flex-1 flex flex-col gap-4">
-            <Card className="flex-1">
+          <div className="flex flex-col gap-4 w-full">
+            <Card className="flex-1 w-full overflow-hidden">
               <CardHeader className="pb-0">
                 <CardTitle>Strategic Visualization</CardTitle>
               </CardHeader>
@@ -1551,16 +1494,22 @@ export const BusinessCapabilityMap: React.FC = () => {
                           {capabilityDomainCount} capability domains
                         </Badge>
                       </div>
-                      <div className="overflow-x-auto pb-3">
-                        <div className="min-w-[960px]">
-                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
+                      <div className="relative">
+                        <div className="overflow-x-auto w-full pb-3">
+                          <div
+                            className="flex gap-4"
+                            style={{
+                              minWidth: infographicColumns.length > 0 ? `${infographicColumns.length * 340}px` : undefined,
+                            }}
+                          >
                             {infographicColumns.map((column) => (
-                              <InfographicColumn
-                                key={column.root.id}
-                                data={column}
-                                onSelect={handleSelectCapability}
-                                selectedCapabilityId={selectedCapability?.id}
-                              />
+                              <div key={column.root.id} className="w-[240px] flex-shrink-0">
+                                <InfographicColumn
+                                  data={column}
+                                  onSelect={handleSelectCapability}
+                                  selectedCapabilityId={selectedCapability?.id}
+                                />
+                              </div>
                             ))}
                             {!infographicColumns.length && (
                               <div className="rounded-xl border bg-muted/40 p-6 text-sm text-muted-foreground">
@@ -2332,6 +2281,63 @@ export const BusinessCapabilityMap: React.FC = () => {
                 ) : (
                   <p className="text-muted-foreground">
                     Select a capability from the hierarchy or visualization to explore supporting data domains, areas, and enabling systems.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+    <div className="flex flex-col gap-4 w-full">
+            <Card className="h-[520px]">
+              <CardHeader className="pb-0">
+                <CardTitle className="flex items-center">
+                  <Building2 className="h-5 w-5 mr-2" />
+                  Capability Hierarchy
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <ScrollArea className="h-[460px]">
+                  <div className="p-4 space-y-1">
+                    {capabilityTree.map((capability) => (
+                      <CapabilityNode
+                        key={capability.id}
+                        capability={capability}
+                        selectedCapability={selectedCapability}
+                        onSelectCapability={setSelectedCapability}
+                        level={0}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center text-sm font-semibold">
+                  <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
+                  Top Investment Opportunities
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {topOpportunities.map((metric) => (
+                  <button
+                    key={metric.id}
+                    onClick={() => handleSelectCapability(metric.id)}
+                    className="w-full text-left rounded-md border p-3 transition hover:border-primary hover:bg-muted"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm">{metric.capability.name}</span>
+                      <Badge variant="outline">{roadmapLabels[metric.horizon].split(" ")[0]}</Badge>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Maturity: {metric.maturityScore.toFixed(1)}/5</span>
+                      <span>Priority: {metric.priorityScore.toFixed(1)}</span>
+                    </div>
+                  </button>
+                ))}
+                {!topOpportunities.length && (
+                  <p className="text-xs text-muted-foreground">
+                    Capabilities will appear here once data is available.
                   </p>
                 )}
               </CardContent>

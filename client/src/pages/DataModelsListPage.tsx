@@ -137,7 +137,7 @@ export default function DataModelsListPage() {
     <div className="min-h-screen bg-muted/20 flex flex-col">
       <TopNavBar />
       <div className="flex-1 w-full">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+        <div className="max-w-6xl mx-auto px-2 sm:px-2 lg:px-4 py-8 space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
           <div className="space-y-2">
             <Badge variant="outline" className="w-fit bg-primary/5 text-primary border-primary/20 text-xs">
@@ -259,7 +259,7 @@ export default function DataModelsListPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-3">
             {filteredGroups.map((group) => {
               const { conceptual, children } = group;
               const logicalLayer = children.find((model) => model.layer === "logical");

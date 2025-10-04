@@ -780,8 +780,8 @@ export default function DataObjectExplorer({
           </span>
         </div>
       </div>
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <div className="px-3 pt-3">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="px-3 py-3 pr-3 space-y-3">
           <Collapsible className="bg-sidebar-header/30 border border-sidebar-border/50 rounded-lg p-3" open={filtersOpen} onOpenChange={setFiltersOpen}>
             <div className="flex items-center justify-between">
               <CollapsibleTrigger asChild>
@@ -836,215 +836,209 @@ export default function DataObjectExplorer({
               </div>
             </CollapsibleContent>
           </Collapsible>
-        </div>
 
-        <div className="flex-1 flex flex-col min-h-0 px-3 pb-3 overflow-hidden">
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            {(objectsLoading || attributesLoading) ? (
-              <div className="flex items-center justify-center py-6">
-                <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                <span className="text-xs text-muted-foreground">Loading...</span>
-              </div>
-            ) : hierarchicalDomains.length > 0 || orphanObjects.length > 0 || globalUnassignedObjects.length > 0 ? (
-              <ScrollArea className="flex-1 min-h-0 overflow-y-auto pr-2">
-                <div className="space-y-3 pb-4">
-                  {globalUnassignedObjects.length > 0 && (
-                    <div className="bg-white dark:bg-card border border-dashed border-primary/40 rounded-lg p-3 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <div className="font-semibold text-xs text-primary">Unassigned Data Area Objects</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            Objects grouped by domain without a data area
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                          {globalUnassignedObjects.reduce((sum, entry) => sum + entry.objects.length, 0)}
-                        </Badge>
-                      </div>
-
-                      <div className="space-y-3">
-                        {globalUnassignedObjects.map(({ domain, objects }) => (
-                          <div key={domain?.id ?? "unknown"} className="border border-border/50 rounded-md p-2">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center space-x-2">
-                                <span className="text-xs font-semibold text-foreground">
-                                  {domain?.name ?? "Unknown Domain"}
-                                </span>
-                                <Badge variant="secondary" className="text-[11px] px-1.5 py-0.5">
-                                  {objects.length}
-                                </Badge>
-                              </div>
-                              <span className="text-[10px] text-muted-foreground">No data area assigned</span>
-                            </div>
-                            <div className="space-y-2">
-                              {objects.map(renderObjectCard)}
-                            </div>
-                          </div>
-                        ))}
+          {(objectsLoading || attributesLoading) ? (
+            <div className="flex items-center justify-center py-6">
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              <span className="text-xs text-muted-foreground">Loading...</span>
+            </div>
+          ) : hierarchicalDomains.length > 0 || orphanObjects.length > 0 || globalUnassignedObjects.length > 0 ? (
+            <div className="space-y-3 pb-4">
+              {globalUnassignedObjects.length > 0 && (
+                <div className="bg-white dark:bg-card border border-dashed border-primary/40 rounded-lg p-3 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <div className="font-semibold text-xs text-primary">Unassigned Data Area Objects</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Objects grouped by domain without a data area
                       </div>
                     </div>
-                  )}
+                    <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
+                      {globalUnassignedObjects.reduce((sum, entry) => sum + entry.objects.length, 0)}
+                    </Badge>
+                  </div>
 
-                  {hierarchicalDomains.map((hierarchy: HierarchicalDomain) => {
-                    const { domain, areas, unassignedObjects, totalObjects } = hierarchy;
-                    const filteredCount = areas.reduce((sum, item) => sum + item.objects.length, 0) + unassignedObjects.length;
-                    const badgeLabel = totalObjects === filteredCount ? `${filteredCount}` : `${filteredCount} / ${totalObjects}`;
-
-                    return (
-                      <Collapsible
-                        key={domain.id}
-                        open={expandedDomains.has(domain.id)}
-                        onOpenChange={() => toggleDomain(domain.id)}
-                      >
-                        <div className="bg-white dark:bg-card border border-border rounded-lg shadow-sm transition-all duration-200">
-                          <CollapsibleTrigger asChild>
-                            <div
-                              className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-muted/40 rounded-t-lg"
-                              data-testid={`objects-domain-${domain.id}`}
-                            >
-                              <div className="flex items-center space-x-2">
-                                <div className="p-1.5 bg-blue-50 dark:bg-blue-950 rounded">
-                                  <Folder className="h-3 w-3 text-blue-600 dark:text-blue-300" />
-                                </div>
-                                <div>
-                                  <span className="font-semibold text-xs text-foreground">{domain.name}</span>
-                                  <div className="text-[11px] text-muted-foreground">{areas.length} area{areas.length === 1 ? "" : "s"}</div>
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border-primary/20 px-1.5 py-0.5">
-                                  {badgeLabel}
-                                </Badge>
-                                {expandedDomains.has(domain.id) ? (
-                                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                                )}
-                              </div>
-                            </div>
-                          </CollapsibleTrigger>
-
-                          <CollapsibleContent>
-                            <div className="space-y-3 p-3 pt-2 border-t border-border/60">
-                              {areas.length === 0 && unassignedObjects.length === 0 && (
-                                <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                                  This domain doesn't have any data areas yet.
-                                </div>
-                              )}
-
-                              {areas.map(({ area, objects, totalObjects: areaTotal }) => {
-                                const areaBadgeLabel = areaTotal === objects.length ? `${objects.length}` : `${objects.length} / ${areaTotal}`;
-
-                                return (
-                                  <Collapsible
-                                    key={area.id}
-                                    open={expandedAreas.has(area.id)}
-                                    onOpenChange={() => toggleArea(area.id)}
-                                  >
-                                    <div className="border border-border/60 rounded-lg overflow-hidden bg-muted/10">
-                                      <CollapsibleTrigger asChild>
-                                        <div
-                                          className={cn(
-                                            "flex items-center justify-between p-3 cursor-pointer hover:bg-muted/40 transition-colors",
-                                            !!currentModel ? "cursor-grab" : "cursor-not-allowed opacity-70"
-                                          )}
-                                          draggable={!!currentModel}
-                                          onDragStart={(e) => handleAreaDragStart(e, area, domain)}
-                                          data-testid={`objects-area-${area.id}`}
-                                        >
-                                          <div>
-                                            <div className="font-medium text-xs text-foreground">{area.name}</div>
-                                            <div className="text-[11px] text-muted-foreground">Data Area</div>
-                                          </div>
-                                          <div className="flex items-center space-x-2">
-                                            <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                                              {areaBadgeLabel}
-                                            </Badge>
-                                            {expandedAreas.has(area.id) ? (
-                                              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                                            ) : (
-                                              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                                            )}
-                                          </div>
-                                        </div>
-                                      </CollapsibleTrigger>
-                                      <CollapsibleContent>
-                                        <div className="space-y-2 p-3 pt-0">
-                                          {objects.length > 0 ? (
-                                            objects.map(renderObjectCard)
-                                          ) : (
-                                            <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                                              No objects match the current filters in this area.
-                                            </div>
-                                          )}
-                                        </div>
-                                      </CollapsibleContent>
-                                    </div>
-                                  </Collapsible>
-                                );
-                              })}
-
-                              {unassignedObjects.length > 0 && globalUnassignedObjects.length === 0 && (
-                                <div className="border border-dashed border-border/60 rounded-lg p-3 bg-white/60 dark:bg-card/60">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div>
-                                      <div className="font-medium text-xs text-foreground">Unassigned Objects</div>
-                                      <div className="text-[11px] text-muted-foreground">Objects without a data area</div>
-                                    </div>
-                                    <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                                      {unassignedObjects.length}
-                                    </Badge>
-                                  </div>
-                                  <div className="space-y-2">
-                                    {unassignedObjects.map(renderObjectCard)}
-                                  </div>
-                                </div>
-                              )}
-
-                              {filteredCount === 0 && unassignedObjects.length === 0 && (
-                                <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                                  No objects match the current filters for this domain.
-                                </div>
-                              )}
-                            </div>
-                          </CollapsibleContent>
-                        </div>
-                      </Collapsible>
-                    );
-                  })}
-
-                  {orphanObjects.length > 0 && (
-                    <div className="bg-white dark:bg-card border border-dashed border-orange-300/60 rounded-lg p-3 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <div className="font-semibold text-xs text-orange-700 dark:text-orange-300">Orphan Objects</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            These objects are not assigned to any domain.
+                  <div className="space-y-3">
+                    {globalUnassignedObjects.map(({ domain, objects }) => (
+                      <div key={domain?.id ?? "unknown"} className="border border-border/50 rounded-md p-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-semibold text-foreground">
+                              {domain?.name ?? "Unknown Domain"}
+                            </span>
+                            <Badge variant="secondary" className="text-[11px] px-1.5 py-0.5">
+                              {objects.length}
+                            </Badge>
                           </div>
+                          <span className="text-[10px] text-muted-foreground">No data area assigned</span>
                         </div>
-                        <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                          {orphanObjects.length}
-                        </Badge>
+                        <div className="space-y-2">
+                          {objects.map(renderObjectCard)}
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        {orphanObjects.map(renderObjectCard)}
-                      </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </div>
-              </ScrollArea>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p className="text-sm mb-1">No domains found</p>
-                <p className="text-xs opacity-75">
-                  You haven't created any domains yet. Add a domain to start organizing data areas and objects.
-                </p>
-              </div>
-            )}
-          </div>
+              )}
+
+              {hierarchicalDomains.map((hierarchy: HierarchicalDomain) => {
+                const { domain, areas, unassignedObjects, totalObjects } = hierarchy;
+                const filteredCount = areas.reduce((sum, item) => sum + item.objects.length, 0) + unassignedObjects.length;
+                const badgeLabel = totalObjects === filteredCount ? `${filteredCount}` : `${filteredCount} / ${totalObjects}`;
+
+                return (
+                  <Collapsible
+                    key={domain.id}
+                    open={expandedDomains.has(domain.id)}
+                    onOpenChange={() => toggleDomain(domain.id)}
+                  >
+                    <div className="bg-white dark:bg-card border border-border rounded-lg shadow-sm transition-all duration-200">
+                      <CollapsibleTrigger asChild>
+                        <div
+                          className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-muted/40 rounded-t-lg"
+                          data-testid={`objects-domain-${domain.id}`}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <div className="p-1.5 bg-blue-50 dark:bg-blue-950 rounded">
+                              <Folder className="h-3 w-3 text-blue-600 dark:text-blue-300" />
+                            </div>
+                            <div>
+                              <span className="font-semibold text-xs text-foreground">{domain.name}</span>
+                              <div className="text-[11px] text-muted-foreground">{areas.length} area{areas.length === 1 ? "" : "s"}</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border-primary/20 px-1.5 py-0.5">
+                              {badgeLabel}
+                            </Badge>
+                            {expandedDomains.has(domain.id) ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+                      </CollapsibleTrigger>
+
+                      <CollapsibleContent>
+                        <div className="space-y-3 p-3 pt-2 border-t border-border/60">
+                          {areas.length === 0 && unassignedObjects.length === 0 && (
+                            <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
+                              This domain doesn't have any data areas yet.
+                            </div>
+                          )}
+
+                          {areas.map(({ area, objects, totalObjects: areaTotal }) => {
+                            const areaBadgeLabel = areaTotal === objects.length ? `${objects.length}` : `${objects.length} / ${areaTotal}`;
+
+                            return (
+                              <Collapsible
+                                key={area.id}
+                                open={expandedAreas.has(area.id)}
+                                onOpenChange={() => toggleArea(area.id)}
+                              >
+                                <div className="border border-border/60 rounded-lg overflow-hidden bg-muted/10">
+                                  <CollapsibleTrigger asChild>
+                                    <div
+                                      className={cn(
+                                        "flex items-center justify-between p-3 cursor-pointer hover:bg-muted/40 transition-colors",
+                                        !!currentModel ? "cursor-grab" : "cursor-not-allowed opacity-70"
+                                      )}
+                                      draggable={!!currentModel}
+                                      onDragStart={(e) => handleAreaDragStart(e, area, domain)}
+                                      data-testid={`objects-area-${area.id}`}
+                                    >
+                                      <div>
+                                        <div className="font-medium text-xs text-foreground">{area.name}</div>
+                                        <div className="text-[11px] text-muted-foreground">Data Area</div>
+                                      </div>
+                                      <div className="flex items-center space-x-2">
+                                        <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
+                                          {areaBadgeLabel}
+                                        </Badge>
+                                        {expandedAreas.has(area.id) ? (
+                                          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                        ) : (
+                                          <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <div className="space-y-2 p-3 pt-0">
+                                      {objects.length > 0 ? (
+                                        objects.map(renderObjectCard)
+                                      ) : (
+                                        <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
+                                          No objects match the current filters in this area.
+                                        </div>
+                                      )}
+                                    </div>
+                                  </CollapsibleContent>
+                                </div>
+                              </Collapsible>
+                            );
+                          })}
+
+                          {unassignedObjects.length > 0 && globalUnassignedObjects.length === 0 && (
+                            <div className="border border-dashed border-border/60 rounded-lg p-3 bg-white/60 dark:bg-card/60">
+                              <div className="flex items-center justify-between mb-2">
+                                <div>
+                                  <div className="font-medium text-xs text-foreground">Unassigned Objects</div>
+                                  <div className="text-[11px] text-muted-foreground">Objects without a data area</div>
+                                </div>
+                                <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
+                                  {unassignedObjects.length}
+                                </Badge>
+                              </div>
+                              <div className="space-y-2">
+                                {unassignedObjects.map(renderObjectCard)}
+                              </div>
+                            </div>
+                          )}
+
+                          {filteredCount === 0 && unassignedObjects.length === 0 && (
+                            <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
+                              No objects match the current filters for this domain.
+                            </div>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                );
+              })}
+
+              {orphanObjects.length > 0 && (
+                <div className="bg-white dark:bg-card border border-dashed border-orange-300/60 rounded-lg p-3 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <div className="font-semibold text-xs text-orange-700 dark:text-orange-300">Orphan Objects</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        These objects are not assigned to any domain.
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
+                      {orphanObjects.length}
+                    </Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {orphanObjects.map(renderObjectCard)}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm mb-1">No domains found</p>
+              <p className="text-xs opacity-75">
+                You haven't created any domains yet. Add a domain to start organizing data areas and objects.
+              </p>
+            </div>
+          )}
         </div>
-      </div>
+      </ScrollArea>
     </div>
   );
 }

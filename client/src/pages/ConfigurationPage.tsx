@@ -321,44 +321,12 @@ export default function ConfigurationPage() {
 
       <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
         <TabsList>
-          <TabsTrigger value="systems">Systems</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
           <TabsTrigger value="ai">AI Configuration</TabsTrigger>
           <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="systems" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Dedicated systems workspace</CardTitle>
-              <CardDescription>
-                Manage system lifecycle, run connection health checks, and synchronize metadata from a purpose-built view.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                We moved system management to its own workspace with richer tooling for add/edit, connection testing, object syncing,
-                and domain assignments. Use the links below to open the workspace or fall back to the legacy form.
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={() => setLocation("/systems")} className="flex items-center gap-2">
-                  <Server className="h-4 w-4" />
-                  Open systems workspace
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setLocation("/configuration/systems/new")}
-                  className="flex items-center gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Quick add (legacy)
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="domains" className="space-y-4">
           <div className="flex justify-between items-center">
