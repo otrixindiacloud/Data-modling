@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { DataModel, DataObject, Attribute, Relationship } from '@shared/schema';
+import { DataModel, DataObject, Attribute, DataModelObjectRelationship } from '@shared/schema';
 
 export interface PDFExportOptions {
   format: 'pdf' | 'png';
@@ -35,7 +35,7 @@ export class PDFExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: PDFExportOptions
   ): Promise<ExportResult> {
     try {
@@ -215,7 +215,7 @@ export class PDFExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: PDFExportOptions
   ): ExportResult {
     try {

@@ -1,4 +1,4 @@
-import { DataModel, DataObject, Attribute, Relationship } from "@shared/schema";
+import { DataModel, DataObject, Attribute, DataModelObjectRelationship } from "@shared/schema";
 
 export interface ExportOptions {
   format: "json" | "sql_ddl" | "quicksql" | "png" | "pdf" | "svg" | "excel" | "csv" | "md" | "yaml";
@@ -23,7 +23,7 @@ export class ExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: ExportOptions
   ): Promise<string> {
     switch (options.format) {
@@ -55,7 +55,7 @@ export class ExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: ExportOptions
   ): Promise<string> {
     const modelData = {
@@ -91,7 +91,7 @@ export class ExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: ExportOptions
   ): Promise<string> {
     let ddl = `-- Generated DDL for ${model.name}\n`;
@@ -129,7 +129,7 @@ export class ExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: ExportOptions
   ): Promise<string> {
     let quicksql = `# ${model.name}\n`;
@@ -254,7 +254,7 @@ export class ExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: ExportOptions
   ): Promise<string> {
     let csv = "";

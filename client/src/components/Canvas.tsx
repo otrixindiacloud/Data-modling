@@ -1036,6 +1036,7 @@ function CanvasComponent() {
       labelStyle: { fontSize: 12, fontWeight: 'bold' },
       data: {
         relationshipType,
+        dataObjectRelationshipId: null,
       },
     };
     
@@ -1069,6 +1070,7 @@ function CanvasComponent() {
                     data: {
                       ...edge.data,
                       relationshipId: data.id,
+                      dataObjectRelationshipId: data.dataObjectRelationshipId ?? null,
                     }
                   }
                 : edge
@@ -1109,6 +1111,7 @@ function CanvasComponent() {
         sourceAttributeId: relationshipData.sourceAttributeId,
         targetAttributeId: relationshipData.targetAttributeId,
         isAttributeRelationship: true,
+        dataObjectRelationshipId: null,
       },
     };
     
@@ -1144,6 +1147,7 @@ function CanvasComponent() {
                     data: {
                       ...edge.data,
                       relationshipId: data.id,
+                      dataObjectRelationshipId: data.dataObjectRelationshipId ?? null,
                     }
                   }
                 : edge

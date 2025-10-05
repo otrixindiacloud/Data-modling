@@ -72,10 +72,8 @@ const diffActionLabel: Record<ModelingAgentDiffEntry["action"], string> = {
 
 export function ModelingAgentPanel({ open, onOpenChange }: ModelingAgentPanelProps) {
   const queryClient = useQueryClient();
-  const { currentModel, allModels } = useModelerStore((state) => ({
-    currentModel: state.currentModel,
-    allModels: state.allModels,
-  }));
+  const currentModel = useModelerStore((state) => state.currentModel);
+  const allModels = useModelerStore((state) => state.allModels);
   const [formState, setFormState] = useState<FormState>(() => createDefaultFormState());
   const [result, setResult] = useState<ModelingAgentResponse | null>(null);
   const [lastRunAt, setLastRunAt] = useState<Date | null>(null);

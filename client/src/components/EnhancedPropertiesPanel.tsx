@@ -9,7 +9,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { 
@@ -27,6 +26,7 @@ import {
   Save,
   X,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Database,
   Wand2,
@@ -38,6 +38,8 @@ import type { DataObject, Attribute } from "@shared/schema";
 
 interface EnhancedPropertiesPanelProps {
   onClose?: () => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 interface AttributeFormData {
@@ -69,7 +71,7 @@ const dataTypes = {
   ]
 };
 
-export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesPanelProps) {
+export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, onToggleCollapse }: EnhancedPropertiesPanelProps) {
   const { selectedObjectId, currentModel, selectedNodeId } = useModelerStore();
   const [activeTab, setActiveTab] = useState("properties");
   const [isAddingAttribute, setIsAddingAttribute] = useState(false);
@@ -379,6 +381,37 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
     };
   }, [queryClient]);
 
+  if (isCollapsed) {
+    return (
+      <div className="w-12 h-full bg-card border-l border-border flex flex-col">
+        <div className="p-2 border-b border-border">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onToggleCollapse?.()}
+            className="w-full h-8 p-0"
+            title="Expand properties"
+            data-testid="button-expand-properties-panel"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center space-y-2 p-1">
+          <div className="text-xs text-muted-foreground text-center">Properties</div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onToggleCollapse?.()}
+            className="w-8 h-8 p-0"
+            title="Expand properties"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!selectedObjectId || !selectedObject) {
     return (
       <div className="h-full flex flex-col">
@@ -423,17 +456,31 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
             <Settings className="h-4 w-4 mr-2" />
             Properties
           </h2>
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="h-6 w-6 p-0"
-              data-testid="button-close-properties"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {onToggleCollapse && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onToggleCollapse?.()}
+                className="h-6 w-6 p-0"
+                title="Collapse properties"
+                data-testid="button-collapse-properties-panel"
+              >
+                <ChevronRight className="h-3 w-3" />
+              </Button>
+            )}
+            {onClose && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                className="h-6 w-6 p-0"
+                data-testid="button-close-properties"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
         <div className="mt-2">
           <h3 className="text-sm font-medium text-foreground" data-testid="text-selected-object-name">
@@ -446,8 +493,8 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
       </div>
 
       <div className="flex-1 min-h-0">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <TabsList className="grid w-full grid-cols-2 m-4 mb-0">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col overflow-hidden">
+          <TabsList className="grid w-full grid-cols-2 px-4 pt-4">
             <TabsTrigger value="properties" className="text-xs" data-testid="tab-properties">
               Properties
             </TabsTrigger>
@@ -456,8 +503,8 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="properties" className="flex-1 m-4 mt-2">
-            <ScrollArea className="h-full">
+          <TabsContent value="properties" className="flex-1 overflow-hidden px-4 pb-4 pt-2">
+            <div className="h-full pr-3 overflow-hidden">
               <div className="space-y-4">
                 {/* Basic Properties */}
                 <div className="border border-border rounded-lg">
@@ -550,10 +597,10 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
                   )}
                 </div>
               </div>
-            </ScrollArea>
+            </div>
           </TabsContent>
 
-          <TabsContent value="attributes" className="flex-1 m-4 mt-2">
+          <TabsContent value="attributes" className="flex-1 overflow-hidden px-4 pb-4 pt-2">
             <div className="h-full flex flex-col space-y-4">
               {/* Add Attribute Button */}
               <div className="flex items-center justify-between">
@@ -610,7 +657,7 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
               </div>
 
               {/* Attributes List */}
-              <ScrollArea className="flex-1">
+              <div className="flex-1 pr-3 overflow-hidden">
                 {attributesLoading ? (
                   <div className="text-center py-6 text-muted-foreground">
                     <div className="text-xs">Loading attributes...</div>
@@ -689,7 +736,7 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
                     <p className="text-xs opacity-75">Add attributes to define the object structure</p>
                   </div>
                 )}
-              </ScrollArea>
+              </div>
             </div>
           </TabsContent>
         </Tabs>
@@ -697,7 +744,7 @@ export default function EnhancedPropertiesPanel({ onClose }: EnhancedPropertiesP
 
       {/* Add/Edit Attribute Dialog */}
       <Dialog open={isAddingAttribute} onOpenChange={setIsAddingAttribute}>
-        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
+  <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               {editingAttributeId ? "Edit Attribute" : "Add New Attribute"}

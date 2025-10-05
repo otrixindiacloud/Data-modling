@@ -1,4 +1,4 @@
-import { DataModel, DataObject, Attribute, Relationship } from '@shared/schema';
+import { DataModel, DataObject, Attribute, DataModelObjectRelationship } from '@shared/schema';
 
 export interface SVGExportOptions {
   format: 'svg_vector' | 'svg_image';
@@ -33,7 +33,7 @@ export class SVGExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: SVGExportOptions
   ): Promise<ExportResult> {
     try {
@@ -159,7 +159,7 @@ export class SVGExportService {
     model: DataModel,
     objects: DataObject[],
     attributes: Attribute[],
-    relationships: Relationship[],
+  relationships: DataModelObjectRelationship[],
     options: SVGExportOptions
   ): ExportResult {
     try {

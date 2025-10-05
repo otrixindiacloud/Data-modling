@@ -123,8 +123,24 @@ export const dataModelProperties = pgTable("data_model_properties", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Relationships - Enhanced to support both object-level and attribute-level relationships
-export const relationships = pgTable("relationships", {
+// Data Object Relationships - Global relationships between core data objects
+export const dataObjectRelationships = pgTable("data_object_relationships", {
+  id: serial("id").primaryKey(),
+  sourceDataObjectId: integer("source_data_object_id").references(() => dataObjects.id).notNull(),
+  targetDataObjectId: integer("target_data_object_id").references(() => dataObjects.id).notNull(),
+  type: text("type").notNull(), // "1:1", "1:N", "N:M"
+  relationshipLevel: text("relationship_level").default("object").notNull(), // "object", "attribute"
+  sourceAttributeId: integer("source_attribute_id").references(() => attributes.id),
+  targetAttributeId: integer("target_attribute_id").references(() => attributes.id),
+  name: text("name"),
+  description: text("description"),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Data Model Object Relationships - Layer-specific relationships tied to model objects
+export const dataModelObjectRelationships = pgTable("data_model_object_relationships", {
   id: serial("id").primaryKey(),
   sourceModelObjectId: integer("source_model_object_id").references(() => dataModelObjects.id).notNull(),
   targetModelObjectId: integer("target_model_object_id").references(() => dataModelObjects.id).notNull(),
@@ -134,7 +150,7 @@ export const relationships = pgTable("relationships", {
   targetAttributeId: integer("target_attribute_id").references(() => dataModelAttributes.id),
   modelId: integer("model_id").references(() => dataModels.id).notNull(),
   layer: text("layer").notNull(), // "conceptual", "logical", "physical"
-  name: text("name"), // Optional relationship name
+  name: text("name"),
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -361,7 +377,7 @@ export const systemsRelations = relations(systems, ({ many }) => ({
 export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
   modelObjects: many(dataModelObjects),
   modelAttributes: many(dataModelAttributes),
-  relationships: many(relationships),
+  relationships: many(dataModelObjectRelationships),
   properties: many(dataModelProperties),
   targetSystem: one(systems, {
     fields: [dataModels.targetSystemId],
@@ -424,6 +440,12 @@ export const dataObjectsRelations = relations(dataObjects, ({ one, many }) => ({
     references: [systems.id],
     relationName: "targetSystem"
   }),
+  sourceRelationships: many(dataObjectRelationships, {
+    relationName: "sourceDataObject",
+  }),
+  targetRelationships: many(dataObjectRelationships, {
+    relationName: "targetDataObject",
+  }),
   modelObjects: many(dataModelObjects),
 }));
 
@@ -442,10 +464,10 @@ export const dataModelObjectsRelations = relations(dataModelObjects, ({ one, man
     relationName: "targetSystem"
   }),
   modelAttributes: many(dataModelAttributes),
-  sourceRelationships: many(relationships, {
+  sourceRelationships: many(dataModelObjectRelationships, {
     relationName: "sourceModelObject",
   }),
-  targetRelationships: many(relationships, {
+  targetRelationships: many(dataModelObjectRelationships, {
     relationName: "targetModelObject",
   }),
 }));
@@ -476,27 +498,48 @@ export const dataModelPropertiesRelations = relations(dataModelProperties, ({ on
   }),
 }));
 
-export const relationshipsRelations = relations(relationships, ({ one }) => ({
+export const dataObjectRelationshipsRelations = relations(dataObjectRelationships, ({ one }) => ({
+  sourceDataObject: one(dataObjects, {
+    fields: [dataObjectRelationships.sourceDataObjectId],
+    references: [dataObjects.id],
+    relationName: "sourceDataObject",
+  }),
+  targetDataObject: one(dataObjects, {
+    fields: [dataObjectRelationships.targetDataObjectId],
+    references: [dataObjects.id],
+    relationName: "targetDataObject",
+  }),
+  sourceAttribute: one(attributes, {
+    fields: [dataObjectRelationships.sourceAttributeId],
+    references: [attributes.id],
+  }),
+  targetAttribute: one(attributes, {
+    fields: [dataObjectRelationships.targetAttributeId],
+    references: [attributes.id],
+  }),
+}));
+
+export const dataModelObjectRelationshipsRelations = relations(dataModelObjectRelationships, ({ one }) => ({
   sourceModelObject: one(dataModelObjects, {
-    fields: [relationships.sourceModelObjectId],
+    fields: [dataModelObjectRelationships.sourceModelObjectId],
     references: [dataModelObjects.id],
     relationName: "sourceModelObject",
   }),
   targetModelObject: one(dataModelObjects, {
-    fields: [relationships.targetModelObjectId],
+    fields: [dataModelObjectRelationships.targetModelObjectId],
     references: [dataModelObjects.id],
     relationName: "targetModelObject",
   }),
   sourceAttribute: one(dataModelAttributes, {
-    fields: [relationships.sourceAttributeId],
+    fields: [dataModelObjectRelationships.sourceAttributeId],
     references: [dataModelAttributes.id],
   }),
   targetAttribute: one(dataModelAttributes, {
-    fields: [relationships.targetAttributeId],
+    fields: [dataModelObjectRelationships.targetAttributeId],
     references: [dataModelAttributes.id],
   }),
   model: one(dataModels, {
-    fields: [relationships.modelId],
+    fields: [dataModelObjectRelationships.modelId],
     references: [dataModels.id],
   }),
 }));
@@ -657,7 +700,13 @@ export const insertDataModelPropertySchema = createInsertSchema(dataModelPropert
   updatedAt: true,
 });
 
-export const insertRelationshipSchema = createInsertSchema(relationships).omit({
+export const insertDataObjectRelationshipSchema = createInsertSchema(dataObjectRelationships).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDataModelObjectRelationshipSchema = createInsertSchema(dataModelObjectRelationships).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -762,8 +811,11 @@ export type InsertDataModelAttribute = z.infer<typeof insertDataModelAttributeSc
 export type DataModelProperty = typeof dataModelProperties.$inferSelect;
 export type InsertDataModelProperty = z.infer<typeof insertDataModelPropertySchema>;
 
-export type Relationship = typeof relationships.$inferSelect;
-export type InsertRelationship = z.infer<typeof insertRelationshipSchema>;
+export type DataObjectRelationship = typeof dataObjectRelationships.$inferSelect;
+export type InsertDataObjectRelationship = z.infer<typeof insertDataObjectRelationshipSchema>;
+
+export type DataModelObjectRelationship = typeof dataModelObjectRelationships.$inferSelect;
+export type InsertDataModelObjectRelationship = z.infer<typeof insertDataModelObjectRelationshipSchema>;
 
 export type System = typeof systems.$inferSelect;
 export type InsertSystem = z.infer<typeof insertSystemSchema>;

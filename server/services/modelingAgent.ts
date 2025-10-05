@@ -5,12 +5,12 @@ import {
   DataModel,
   DataModelObject,
   DataObject,
-  Relationship,
+  DataModelObjectRelationship,
   type InsertAttribute,
   type InsertDataModel,
   type InsertDataModelObject,
   type InsertDataObject,
-  type InsertRelationship,
+  type InsertDataModelObjectRelationship,
 } from "@shared/schema";
 import { storage } from "../storage";
 import { ExportService } from "./exportService";
@@ -178,7 +178,7 @@ interface LayerEntityContext {
 interface ModelLayerContext {
   model: DataModel;
   entities: LayerEntityContext[];
-  relationships: Relationship[];
+  relationships: DataModelObjectRelationship[];
 }
 
 interface ModelingContext {
@@ -599,7 +599,7 @@ class ModelingAgentService {
       dataModelObjectByObjectId.set(dmo.objectId, dmo);
     }
 
-    const relationships = await storage.getRelationshipsByModel(model.id);
+  const relationships = await storage.getDataModelObjectRelationshipsByModel(model.id);
 
     const entities: LayerEntityContext[] = objects.map((object) => ({
       object,
@@ -963,15 +963,16 @@ class ModelingAgentService {
     const relatedDataModelObjects = dataModelObjects.filter((dmo) => dmo.objectId === entity.object.id);
 
     for (const dmo of relatedDataModelObjects) {
-      const relationships = await storage.getRelationshipsByModel(model.id);
+      const relationships = await storage.getDataModelObjectRelationshipsByModel(model.id);
       for (const relationship of relationships) {
         if (relationship.sourceModelObjectId === dmo.id || relationship.targetModelObjectId === dmo.id) {
-          await storage.deleteRelationship(relationship.id);
+          await storage.deleteDataModelObjectRelationship(relationship.id);
         }
       }
       await storage.deleteDataModelObject(dmo.id);
     }
 
+    await storage.deleteDataObjectRelationshipsByObject(entity.object.id);
     await storage.deleteAttributesByObject(entity.object.id);
     await storage.deleteDataObject(entity.object.id);
   }
@@ -1320,7 +1321,7 @@ class ModelingAgentService {
       (relationship) => relationship.relationshipLevel === "object",
     );
 
-    const existingMap = new Map<string, Relationship>();
+  const existingMap = new Map<string, DataModelObjectRelationship>();
     for (const relationship of existingRelationships) {
       const key = this.computeRelationshipKey(
         relationship.sourceModelObjectId,
@@ -1334,7 +1335,7 @@ class ModelingAgentService {
       const [key, desired] = desiredEntries[i];
       const existing = existingMap.get(key);
       if (!existing) {
-        await storage.createRelationship({
+  await storage.createDataModelObjectRelationship({
           sourceModelObjectId: desired.sourceDmoId,
           targetModelObjectId: desired.targetDmoId,
           type: desired.type,
@@ -1345,7 +1346,7 @@ class ModelingAgentService {
           layer: "conceptual",
           name: null,
           description: desired.description ?? null,
-        } satisfies InsertRelationship);
+  } satisfies InsertDataModelObjectRelationship);
 
         diff.push({
           action: "add_relationship",
@@ -1360,7 +1361,7 @@ class ModelingAgentService {
       }
 
       if (existing.type !== desired.type || (existing.description ?? null) !== (desired.description ?? null)) {
-        await storage.updateRelationship(existing.id, {
+        await storage.updateDataModelObjectRelationship(existing.id, {
           type: desired.type,
           description: desired.description ?? null,
         });
@@ -1381,7 +1382,7 @@ class ModelingAgentService {
       const [key, relationship] = existingEntries[i];
       if (!desiredMap.has(key)) {
         if (allowDrop) {
-          await storage.deleteRelationship(relationship.id);
+          await storage.deleteDataModelObjectRelationship(relationship.id);
           diff.push({
             action: "remove_relationship",
             layer: "conceptual",
@@ -1474,7 +1475,7 @@ class ModelingAgentService {
       if (!layer) {
         return new Set<number>();
       }
-      const relationships = await storage.getRelationshipsByModel(layer.model.id);
+  const relationships = await storage.getDataModelObjectRelationshipsByModel(layer.model.id);
       const attributeIds = new Set<number>();
       for (const relationship of relationships) {
         if (relationship.relationshipLevel === "attribute") {

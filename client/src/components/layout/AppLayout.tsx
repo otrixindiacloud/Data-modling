@@ -15,7 +15,6 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [location] = useLocation();
-  const hideSidebar = location.startsWith("/modeler");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") {
       return false;
@@ -77,36 +76,33 @@ export function AppLayout({ children }: AppLayoutProps) {
     setIsSidebarOpen(false);
   }, [location]);
 
-  const renderSidebar = (collapsed = isSidebarCollapsed) => (
+  const renderSidebar = () => (
     <AppSidebar
-      collapsed={collapsed}
+      collapsed={isSidebarCollapsed}
       onNavigate={() => setIsSidebarOpen(false)}
+      onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
     />
   );
 
   return (
     <div className="flex min-h-screen w-full bg-background text-foreground">
-      {!hideSidebar && (
-        <aside
-          className={cn(
-            "sticky top-0 hidden h-screen flex-col border-r border-border bg-card md:flex transition-[width] duration-300 ease-in-out",
-            isSidebarCollapsed ? "w-16" : "w-60 xl:w-64"
-          )}
-          data-collapsed={isSidebarCollapsed ? "true" : "false"}
-        >
-          {renderSidebar()}
-        </aside>
-      )}
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-screen flex-col border-r border-border bg-card md:flex transition-[width] duration-300 ease-in-out",
+          isSidebarCollapsed ? "w-16" : "w-60 xl:w-64"
+        )}
+        data-collapsed={isSidebarCollapsed ? "true" : "false"}
+      >
+        {renderSidebar()}
+      </aside>
       <main className="flex min-h-screen flex-1 flex-col">
         {children}
       </main>
-      {!hideSidebar && (
-        <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
-          <SheetContent side="left" className="w-72 p-0 sm:w-80 md:hidden">
-            {renderSidebar(false)}
-          </SheetContent>
-        </Sheet>
-      )}
+      <Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
+        <SheetContent side="left" className="w-72 p-0 sm:w-80 md:hidden">
+          {renderSidebar()}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

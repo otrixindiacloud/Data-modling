@@ -2,12 +2,10 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Database,
-  Folder,
   Plus,
   Filter,
   X,
   ChevronDown,
-  ChevronRight,
   ChevronLeft,
   FileText,
   Search,
@@ -18,7 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useModelerStore } from "@/store/modelerStore";
 import { useToast } from "@/hooks/use-toast";
@@ -26,19 +23,6 @@ import type { DataDomain, DataObject, DataArea } from "@shared/schema";
 import { getSystemColor, getSystemColorBg, getSystemColorText } from "@/lib/systemColors";
 
 type ExplorerDataObject = DataObject & Record<string, any>;
-
-interface HierarchicalArea {
-  area: DataArea;
-  objects: ExplorerDataObject[];
-  totalObjects: number;
-}
-
-interface HierarchicalDomain {
-  domain: DataDomain;
-  areas: HierarchicalArea[];
-  unassignedObjects: ExplorerDataObject[];
-  totalObjects: number;
-}
 
 interface DataObjectExplorerProps {
   isCollapsed: boolean;
@@ -62,8 +46,6 @@ export default function DataObjectExplorer({
   const [selectedSystem, setSelectedSystem] = useState("all");
   
   // UI states
-  const [expandedDomains, setExpandedDomains] = useState<Set<number>>(new Set());
-  const [expandedAreas, setExpandedAreas] = useState<Set<number>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -250,30 +232,6 @@ export default function DataObjectExplorer({
     setSelectedSystem("all");
   };
 
-  const toggleDomain = (domainId: number) => {
-    setExpandedDomains(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(domainId)) {
-        newSet.delete(domainId);
-      } else {
-        newSet.add(domainId);
-      }
-      return newSet;
-    });
-  };
-
-  const toggleArea = (areaId: number) => {
-    setExpandedAreas(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(areaId)) {
-        newSet.delete(areaId);
-      } else {
-        newSet.add(areaId);
-      }
-      return newSet;
-    });
-  };
-
   // Manual refresh function with forced cache invalidation
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -412,149 +370,6 @@ export default function DataObjectExplorer({
     e.dataTransfer.setData('application/json', dragData);
     e.dataTransfer.effectAllowed = 'copy';
   }, [currentModel, currentLayer, getDomainName, getAreaName]);
-
-  const objectsByDomain = useMemo(() => {
-    const map = new Map<number, ExplorerDataObject[]>();
-    allDataObjects.forEach((obj: ExplorerDataObject) => {
-      if (obj?.domainId) {
-        const list = map.get(obj.domainId) ?? [];
-        list.push(obj);
-        map.set(obj.domainId, list);
-      }
-    });
-    return map;
-  }, [allDataObjects]);
-
-  const objectsByAreaFull = useMemo(() => {
-    const map = new Map<number, ExplorerDataObject[]>();
-    allDataObjects.forEach((obj: ExplorerDataObject) => {
-      if (obj?.dataAreaId) {
-        const list = map.get(obj.dataAreaId) ?? [];
-        list.push(obj);
-        map.set(obj.dataAreaId, list);
-      }
-    });
-    return map;
-  }, [allDataObjects]);
-
-  const filteredObjectsByArea = useMemo(() => {
-    const map = new Map<number, ExplorerDataObject[]>();
-    filteredObjects.forEach((obj: ExplorerDataObject) => {
-      if (obj?.dataAreaId) {
-        const list = map.get(obj.dataAreaId) ?? [];
-        list.push(obj);
-        map.set(obj.dataAreaId, list);
-      }
-    });
-    return map;
-  }, [filteredObjects]);
-
-  const filteredObjectsByDomainUnassigned = useMemo(() => {
-    const map = new Map<number, ExplorerDataObject[]>();
-    filteredObjects.forEach((obj: ExplorerDataObject) => {
-      if (obj?.domainId && !obj?.dataAreaId) {
-        const list = map.get(obj.domainId) ?? [];
-        list.push(obj);
-        map.set(obj.domainId, list);
-      }
-    });
-    return map;
-  }, [filteredObjects]);
-
-  const globalUnassignedObjects = useMemo(() => {
-    const map = new Map<number, { domain: DataDomain | undefined; objects: ExplorerDataObject[] }>();
-
-    filteredObjects.forEach((obj: ExplorerDataObject) => {
-      if (!obj?.dataAreaId && obj?.domainId) {
-        const domainEntry = map.get(obj.domainId) ?? {
-          domain: domains.find((d: DataDomain) => d.id === obj.domainId),
-          objects: [] as ExplorerDataObject[],
-        };
-
-        domainEntry.objects.push(obj);
-        map.set(obj.domainId, domainEntry);
-      }
-    });
-
-    return Array.from(map.values())
-      .map(({ domain, objects }) => ({
-        domain,
-        objects: objects
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => {
-        const nameA = a.domain?.name ?? "Unknown Domain";
-        const nameB = b.domain?.name ?? "Unknown Domain";
-        return nameA.localeCompare(nameB);
-      });
-  }, [filteredObjects, domains]);
-
-  const orphanObjects = useMemo(
-    () => filteredObjects.filter((obj: ExplorerDataObject) => !obj?.domainId || !domains.some((domain: DataDomain) => domain.id === obj.domainId)),
-    [filteredObjects, domains]
-  );
-
-  const hierarchicalDomains = useMemo(() => {
-    return domains.map((domain: DataDomain) => {
-      const areas = allDataAreas
-        .filter((area: DataArea) => area.domainId === domain.id)
-        .sort((a: DataArea, b: DataArea) => a.name.localeCompare(b.name))
-        .map((area: DataArea) => {
-          const objects = (filteredObjectsByArea.get(area.id) || [])
-            .slice()
-            .sort((a: ExplorerDataObject, b: ExplorerDataObject) => a.name.localeCompare(b.name));
-          const totalObjects = (objectsByAreaFull.get(area.id) || []).length;
-          return {
-            area,
-            objects,
-            totalObjects
-          };
-        });
-
-      const unassignedObjects = (filteredObjectsByDomainUnassigned.get(domain.id) || [])
-        .slice()
-        .sort((a: ExplorerDataObject, b: ExplorerDataObject) => a.name.localeCompare(b.name));
-      const totalObjects = (objectsByDomain.get(domain.id) || []).length;
-
-      return {
-        domain,
-        areas,
-        unassignedObjects,
-        totalObjects
-      };
-    });
-  }, [domains, allDataAreas, filteredObjectsByArea, filteredObjectsByDomainUnassigned, objectsByAreaFull, objectsByDomain]);
-
-  const handleAreaDragStart = useCallback((e: React.DragEvent, area: DataArea, domain: DataDomain) => {
-    const areaObjects = objectsByAreaFull.get(area.id) || [];
-
-    if (!areaObjects.length) {
-      e.preventDefault();
-      toast({
-        title: "No Objects to Drag",
-        description: `The data area "${area.name}" has no objects right now.`,
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const payload = {
-      type: 'data-area',
-      area: {
-        ...area,
-        domainName: domain.name
-      },
-      objects: areaObjects.map((obj: ExplorerDataObject) => ({
-        ...obj,
-        domainName: domain.name,
-        dataAreaName: area.name
-      }))
-    };
-
-    e.dataTransfer.setData('application/json', JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = 'copy';
-  }, [objectsByAreaFull, toast]);
 
   const renderObjectCard = (obj: ExplorerDataObject) => {
     const systemBorderColor = getSystemColor(obj.sourceSystem || obj.targetSystem);
@@ -713,8 +528,6 @@ export default function DataObjectExplorer({
   }
 
   const totalFilteredObjects = filteredObjects.length;
-  const totalDomains = domains.length;
-  const totalAreas = allDataAreas.length;
   const hasActiveFilters = Boolean(
     searchTerm ||
     selectedDomain !== "all" ||
@@ -723,13 +536,14 @@ export default function DataObjectExplorer({
   );
 
   return (
-    <div className="h-full bg-sidebar border-r border-sidebar-border flex flex-col w-full min-w-[18rem] max-w-full overflow-hidden">
-      <div className="p-3 border-b border-sidebar-border bg-sidebar-header">
+    <div className="flex flex-1 flex-col h-full min-h-0 bg-sidebar border-r border-sidebar-border w-full min-w-[18rem] max-w-full">
+      {/* Fixed Header Section */}
+      <div className="flex-shrink-0 p-3 border-b border-sidebar-border bg-sidebar-header">
         <div className="flex items-center justify-between mb-2">
           <div>
             <h2 className="text-sm font-semibold text-sidebar-foreground flex items-center">
               <Database className="h-4 w-4 mr-2" />
-              Domain → Area → Objects
+              Data Objects Explorer
             </h2>
           </div>
           <div className="flex items-center space-x-1">
@@ -780,8 +594,10 @@ export default function DataObjectExplorer({
           </span>
         </div>
       </div>
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="px-3 py-3 pr-3 space-y-3">
+      
+      {/* Scrollable Content Section */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="px-3 py-3 space-y-3">
           <Collapsible className="bg-sidebar-header/30 border border-sidebar-border/50 rounded-lg p-3" open={filtersOpen} onOpenChange={setFiltersOpen}>
             <div className="flex items-center justify-between">
               <CollapsibleTrigger asChild>
@@ -820,6 +636,34 @@ export default function DataObjectExplorer({
               </div>
 
               <div className="grid grid-cols-1 gap-2">
+                <Select value={selectedDomain} onValueChange={setSelectedDomain}>
+                  <SelectTrigger className="h-8 text-xs" data-testid="select-domain-filter">
+                    <SelectValue placeholder="All Domains" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Domains</SelectItem>
+                    {domains.map((domain: DataDomain) => (
+                      <SelectItem key={domain.id} value={domain.id.toString()}>
+                        {domain.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={selectedDataArea} onValueChange={setSelectedDataArea}>
+                  <SelectTrigger className="h-8 text-xs" data-testid="select-data-area-filter">
+                    <SelectValue placeholder="All Data Areas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Data Areas</SelectItem>
+                    {availableDataAreas.map((area: DataArea) => (
+                      <SelectItem key={area.id} value={area.id.toString()}>
+                        {area.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 <Select value={selectedSystem} onValueChange={setSelectedSystem}>
                   <SelectTrigger className="h-8 text-xs" data-testid="select-system-filter">
                     <SelectValue placeholder="All Systems" />
@@ -842,203 +686,21 @@ export default function DataObjectExplorer({
               <RefreshCw className="h-4 w-4 animate-spin mr-2" />
               <span className="text-xs text-muted-foreground">Loading...</span>
             </div>
-          ) : hierarchicalDomains.length > 0 || orphanObjects.length > 0 || globalUnassignedObjects.length > 0 ? (
-            <div className="space-y-3 pb-4">
-              {globalUnassignedObjects.length > 0 && (
-                <div className="bg-white dark:bg-card border border-dashed border-primary/40 rounded-lg p-3 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <div className="font-semibold text-xs text-primary">Unassigned Data Area Objects</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Objects grouped by domain without a data area
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                      {globalUnassignedObjects.reduce((sum, entry) => sum + entry.objects.length, 0)}
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-3">
-                    {globalUnassignedObjects.map(({ domain, objects }) => (
-                      <div key={domain?.id ?? "unknown"} className="border border-border/50 rounded-md p-2">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xs font-semibold text-foreground">
-                              {domain?.name ?? "Unknown Domain"}
-                            </span>
-                            <Badge variant="secondary" className="text-[11px] px-1.5 py-0.5">
-                              {objects.length}
-                            </Badge>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground">No data area assigned</span>
-                        </div>
-                        <div className="space-y-2">
-                          {objects.map(renderObjectCard)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {hierarchicalDomains.map((hierarchy: HierarchicalDomain) => {
-                const { domain, areas, unassignedObjects, totalObjects } = hierarchy;
-                const filteredCount = areas.reduce((sum, item) => sum + item.objects.length, 0) + unassignedObjects.length;
-                const badgeLabel = totalObjects === filteredCount ? `${filteredCount}` : `${filteredCount} / ${totalObjects}`;
-
-                return (
-                  <Collapsible
-                    key={domain.id}
-                    open={expandedDomains.has(domain.id)}
-                    onOpenChange={() => toggleDomain(domain.id)}
-                  >
-                    <div className="bg-white dark:bg-card border border-border rounded-lg shadow-sm transition-all duration-200">
-                      <CollapsibleTrigger asChild>
-                        <div
-                          className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-muted/40 rounded-t-lg"
-                          data-testid={`objects-domain-${domain.id}`}
-                        >
-                          <div className="flex items-center space-x-2">
-                            <div className="p-1.5 bg-blue-50 dark:bg-blue-950 rounded">
-                              <Folder className="h-3 w-3 text-blue-600 dark:text-blue-300" />
-                            </div>
-                            <div>
-                              <span className="font-semibold text-xs text-foreground">{domain.name}</span>
-                              <div className="text-[11px] text-muted-foreground">{areas.length} area{areas.length === 1 ? "" : "s"}</div>
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border-primary/20 px-1.5 py-0.5">
-                              {badgeLabel}
-                            </Badge>
-                            {expandedDomains.has(domain.id) ? (
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </div>
-                        </div>
-                      </CollapsibleTrigger>
-
-                      <CollapsibleContent>
-                        <div className="space-y-3 p-3 pt-2 border-t border-border/60">
-                          {areas.length === 0 && unassignedObjects.length === 0 && (
-                            <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                              This domain doesn't have any data areas yet.
-                            </div>
-                          )}
-
-                          {areas.map(({ area, objects, totalObjects: areaTotal }) => {
-                            const areaBadgeLabel = areaTotal === objects.length ? `${objects.length}` : `${objects.length} / ${areaTotal}`;
-
-                            return (
-                              <Collapsible
-                                key={area.id}
-                                open={expandedAreas.has(area.id)}
-                                onOpenChange={() => toggleArea(area.id)}
-                              >
-                                <div className="border border-border/60 rounded-lg overflow-hidden bg-muted/10">
-                                  <CollapsibleTrigger asChild>
-                                    <div
-                                      className={cn(
-                                        "flex items-center justify-between p-3 cursor-pointer hover:bg-muted/40 transition-colors",
-                                        !!currentModel ? "cursor-grab" : "cursor-not-allowed opacity-70"
-                                      )}
-                                      draggable={!!currentModel}
-                                      onDragStart={(e) => handleAreaDragStart(e, area, domain)}
-                                      data-testid={`objects-area-${area.id}`}
-                                    >
-                                      <div>
-                                        <div className="font-medium text-xs text-foreground">{area.name}</div>
-                                        <div className="text-[11px] text-muted-foreground">Data Area</div>
-                                      </div>
-                                      <div className="flex items-center space-x-2">
-                                        <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                                          {areaBadgeLabel}
-                                        </Badge>
-                                        {expandedAreas.has(area.id) ? (
-                                          <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                                        ) : (
-                                          <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                                        )}
-                                      </div>
-                                    </div>
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="space-y-2 p-3 pt-0">
-                                      {objects.length > 0 ? (
-                                        objects.map(renderObjectCard)
-                                      ) : (
-                                        <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                                          No objects match the current filters in this area.
-                                        </div>
-                                      )}
-                                    </div>
-                                  </CollapsibleContent>
-                                </div>
-                              </Collapsible>
-                            );
-                          })}
-
-                          {unassignedObjects.length > 0 && globalUnassignedObjects.length === 0 && (
-                            <div className="border border-dashed border-border/60 rounded-lg p-3 bg-white/60 dark:bg-card/60">
-                              <div className="flex items-center justify-between mb-2">
-                                <div>
-                                  <div className="font-medium text-xs text-foreground">Unassigned Objects</div>
-                                  <div className="text-[11px] text-muted-foreground">Objects without a data area</div>
-                                </div>
-                                <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                                  {unassignedObjects.length}
-                                </Badge>
-                              </div>
-                              <div className="space-y-2">
-                                {unassignedObjects.map(renderObjectCard)}
-                              </div>
-                            </div>
-                          )}
-
-                          {filteredCount === 0 && unassignedObjects.length === 0 && (
-                            <div className="text-[11px] text-muted-foreground border border-dashed border-border/60 rounded-md p-3">
-                              No objects match the current filters for this domain.
-                            </div>
-                          )}
-                        </div>
-                      </CollapsibleContent>
-                    </div>
-                  </Collapsible>
-                );
-              })}
-
-              {orphanObjects.length > 0 && (
-                <div className="bg-white dark:bg-card border border-dashed border-orange-300/60 rounded-lg p-3 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <div className="font-semibold text-xs text-orange-700 dark:text-orange-300">Orphan Objects</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        These objects are not assigned to any domain.
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="text-[11px] px-1.5 py-0.5">
-                      {orphanObjects.length}
-                    </Badge>
-                  </div>
-                  <div className="space-y-2">
-                    {orphanObjects.map(renderObjectCard)}
-                  </div>
-                </div>
-              )}
+          ) : filteredObjects.length > 0 ? (
+            <div className="space-y-2 pb-4">
+              {filteredObjects.map(renderObjectCard)}
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p className="text-sm mb-1">No domains found</p>
+              <p className="text-sm mb-1">No objects found</p>
               <p className="text-xs opacity-75">
-                You haven't created any domains yet. Add a domain to start organizing data areas and objects.
+                Adjust your filters or create a new data object to get started.
               </p>
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

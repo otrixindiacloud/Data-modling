@@ -15,7 +15,11 @@ import {
   type DataDomain,
   type DataModel,
   type DataModelObject,
+  type DataModelAttribute,
+  type DataModelObjectRelationship,
+  type DataModelProperty,
   type DataObject,
+  type DataObjectRelationship,
   type InsertAttribute,
   type InsertDataArea,
   type InsertDataDomain,
@@ -34,6 +38,10 @@ interface MockStore {
   dataObjects: DataObject[];
   dataModelObjects: DataModelObject[];
   attributes: Attribute[];
+  dataObjectRelationships: DataObjectRelationship[];
+  dataModelAttributes: DataModelAttribute[];
+  dataModelObjectRelationships: DataModelObjectRelationship[];
+  dataModelProperties: DataModelProperty[];
 }
 
 const store: MockStore = {
@@ -43,7 +51,11 @@ const store: MockStore = {
   dataAreas: [],
   dataObjects: [],
   dataModelObjects: [],
-  attributes: []
+  attributes: [],
+  dataObjectRelationships: [],
+  dataModelAttributes: [],
+  dataModelObjectRelationships: [],
+  dataModelProperties: []
 };
 
 const counters = {
@@ -53,7 +65,11 @@ const counters = {
   dataArea: 0,
   dataObject: 0,
   dataModelObject: 0,
-  attribute: 0
+  attribute: 0,
+  dataObjectRelationship: 0,
+  dataModelAttribute: 0,
+  dataModelObjectRelationship: 0,
+  dataModelProperty: 0
 };
 
 function resetMockStore() {
@@ -64,6 +80,10 @@ function resetMockStore() {
   store.dataObjects.length = 0;
   store.dataModelObjects.length = 0;
   store.attributes.length = 0;
+  store.dataObjectRelationships.length = 0;
+  store.dataModelAttributes.length = 0;
+  store.dataModelObjectRelationships.length = 0;
+  store.dataModelProperties.length = 0;
   counters.system = 0;
   counters.dataModel = 0;
   counters.dataDomain = 0;
@@ -71,6 +91,274 @@ function resetMockStore() {
   counters.dataObject = 0;
   counters.dataModelObject = 0;
   counters.attribute = 0;
+  counters.dataObjectRelationship = 0;
+  counters.dataModelAttribute = 0;
+  counters.dataModelObjectRelationship = 0;
+  counters.dataModelProperty = 0;
+}
+
+async function seedObjectLakeData() {
+  const targetSystem = store.systems[0] ?? await storageMock.createSystem({
+    name: "Data Lake",
+    category: "Target",
+    type: "adls",
+    description: "Consolidated data lake"
+  } satisfies InsertSystem);
+
+  const sourceSystem = await storageMock.createSystem({
+    name: "CRM Core",
+    category: "Source",
+    type: "sql",
+    description: "Primary CRM platform"
+  } satisfies InsertSystem);
+
+  const domain = await storageMock.createDataDomain({
+    name: "Customer Experience",
+    description: "Customer facing information"
+  } satisfies InsertDataDomain);
+
+  const dataArea = await storageMock.createDataArea({
+    name: "Profiles",
+    domainId: domain.id,
+    description: "Customer profile attributes"
+  } satisfies InsertDataArea);
+
+  const conceptualModel = await storageMock.createDataModel({
+    name: "Customer 360 Conceptual",
+    layer: "conceptual",
+    targetSystemId: targetSystem.id,
+    domainId: domain.id,
+    dataAreaId: dataArea.id
+  } satisfies InsertDataModel);
+
+  const logicalModel = await storageMock.createDataModel({
+    name: "Customer 360 Logical",
+    layer: "logical",
+    parentModelId: conceptualModel.id,
+    targetSystemId: targetSystem.id,
+    domainId: domain.id,
+    dataAreaId: dataArea.id
+  } satisfies InsertDataModel);
+
+  const physicalModel = await storageMock.createDataModel({
+    name: "Customer 360 Physical",
+    layer: "physical",
+    parentModelId: conceptualModel.id,
+    targetSystemId: targetSystem.id,
+    domainId: domain.id,
+    dataAreaId: dataArea.id
+  } satisfies InsertDataModel);
+
+  const userObject = await storageMock.createDataObject({
+    name: "User",
+    modelId: conceptualModel.id,
+    domainId: domain.id,
+    dataAreaId: dataArea.id,
+    sourceSystemId: sourceSystem.id,
+    targetSystemId: targetSystem.id,
+    objectType: "entity",
+    description: "Master user record",
+    metadata: { steward: "Data Platform" },
+    position: { x: 120, y: 80 },
+    commonProperties: { retention: "7y" }
+  } satisfies InsertDataObject);
+
+  const productObject = await storageMock.createDataObject({
+    name: "Product",
+    modelId: conceptualModel.id,
+    domainId: domain.id,
+    dataAreaId: dataArea.id,
+    sourceSystemId: sourceSystem.id,
+    targetSystemId: targetSystem.id,
+    objectType: "entity",
+    description: "Managed product definition",
+    metadata: { steward: "Commerce Team" },
+    position: { x: 240, y: 140 },
+    commonProperties: { retention: "5y" }
+  } satisfies InsertDataObject);
+
+  const userIdAttribute = await storageMock.createAttribute({
+    name: "user_id",
+    objectId: userObject.id,
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "uuid",
+    dataType: "UUID",
+    nullable: false,
+    isPrimaryKey: true,
+    orderIndex: 1
+  } satisfies InsertAttribute);
+
+  const userEmailAttribute = await storageMock.createAttribute({
+    name: "email",
+    objectId: userObject.id,
+    conceptualType: "Text",
+    logicalType: "VARCHAR",
+    physicalType: "varchar(255)",
+    dataType: "VARCHAR",
+    nullable: false,
+    isPrimaryKey: false,
+    orderIndex: 2
+  } satisfies InsertAttribute);
+
+  await storageMock.createAttribute({
+    name: "product_id",
+    objectId: productObject.id,
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "uuid",
+    dataType: "UUID",
+    nullable: false,
+    isPrimaryKey: true,
+    orderIndex: 1
+  } satisfies InsertAttribute);
+
+  const userLogicalInstance = await storageMock.createDataModelObject({
+    objectId: userObject.id,
+    modelId: logicalModel.id,
+    targetSystemId: targetSystem.id,
+    metadata: { alias: "dim_user" },
+    position: { x: 150, y: 100 },
+    isVisible: true,
+    layerSpecificConfig: { color: "blue" }
+  } satisfies InsertDataModelObject);
+
+  const userPhysicalInstance = await storageMock.createDataModelObject({
+    objectId: userObject.id,
+    modelId: physicalModel.id,
+    targetSystemId: targetSystem.id,
+    metadata: { table: "users" },
+    position: { x: 220, y: 100 },
+    isVisible: true,
+    layerSpecificConfig: { schema: "public" }
+  } satisfies InsertDataModelObject);
+
+  const productLogicalInstance = await storageMock.createDataModelObject({
+    objectId: productObject.id,
+    modelId: logicalModel.id,
+    targetSystemId: targetSystem.id,
+    metadata: { alias: "dim_product" },
+    position: { x: 260, y: 140 },
+    isVisible: false,
+    layerSpecificConfig: { color: "green" }
+  } satisfies InsertDataModelObject);
+
+  store.dataModelAttributes.push({
+    id: ++counters.dataModelAttribute,
+    attributeId: userIdAttribute.id,
+    modelObjectId: userLogicalInstance.id,
+    modelId: logicalModel.id,
+    conceptualType: "Identifier",
+    logicalType: "UUID",
+    physicalType: "uuid",
+    nullable: false,
+    isPrimaryKey: true,
+    isForeignKey: false,
+    orderIndex: 1,
+    layerSpecificConfig: { columnName: "user_id" },
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+
+  store.dataModelAttributes.push({
+    id: ++counters.dataModelAttribute,
+    attributeId: userEmailAttribute.id,
+    modelObjectId: userLogicalInstance.id,
+    modelId: logicalModel.id,
+    conceptualType: "Text",
+    logicalType: "VARCHAR",
+    physicalType: "varchar(255)",
+    nullable: false,
+    isPrimaryKey: false,
+    isForeignKey: false,
+    orderIndex: 2,
+    layerSpecificConfig: { columnName: "email" },
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+
+  store.dataObjectRelationships.push({
+    id: ++counters.dataObjectRelationship,
+    sourceDataObjectId: userObject.id,
+    targetDataObjectId: productObject.id,
+    type: "1:N",
+    relationshipLevel: "object",
+    sourceAttributeId: null,
+    targetAttributeId: null,
+    name: "owns",
+    description: "Users can own products",
+    metadata: { cardinality: "1:N" },
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+
+  store.dataModelObjectRelationships.push({
+    id: ++counters.dataModelObjectRelationship,
+    sourceModelObjectId: userLogicalInstance.id,
+    targetModelObjectId: productLogicalInstance.id,
+    type: "1:N",
+    relationshipLevel: "object",
+    sourceAttributeId: null,
+    targetAttributeId: null,
+    modelId: logicalModel.id,
+    layer: "logical",
+    name: "Maintains",
+    description: "Logical user maintains products",
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+
+  const now = new Date();
+  store.dataModelProperties.push({
+    id: ++counters.dataModelProperty,
+    entityType: "object",
+    entityId: userObject.id,
+    modelId: conceptualModel.id,
+    propertyName: "criticality",
+    propertyValue: "high",
+    propertyType: "string",
+    layer: "conceptual",
+    description: "Business critical object",
+    isSystemProperty: false,
+    createdAt: now,
+    updatedAt: now
+  });
+
+  store.dataModelProperties.push({
+    id: ++counters.dataModelProperty,
+    entityType: "model_object",
+    entityId: userLogicalInstance.id,
+    modelId: logicalModel.id,
+    propertyName: "integrationPattern",
+    propertyValue: "cdc",
+    propertyType: "string",
+    layer: "logical",
+    description: null,
+    isSystemProperty: false,
+    createdAt: now,
+    updatedAt: now
+  });
+
+  store.dataModelProperties.push({
+    id: ++counters.dataModelProperty,
+    entityType: "attribute",
+    entityId: userEmailAttribute.id,
+    modelId: logicalModel.id,
+    propertyName: "piiCategory",
+    propertyValue: "personal",
+    propertyType: "string",
+    layer: "logical",
+    description: null,
+    isSystemProperty: false,
+    createdAt: now,
+    updatedAt: now
+  });
+
+  return {
+    userObject,
+    productObject,
+    logicalModel
+  };
 }
 
 const storageMock = {
@@ -242,6 +530,12 @@ const storageMock = {
   async deleteDataModelObjectsByObject(objectId: number): Promise<void> {
     store.dataModelObjects = store.dataModelObjects.filter((modelObject) => modelObject.objectId !== objectId);
   },
+  async getDataModelObjectRelationships(): Promise<DataModelObjectRelationship[]> {
+    return store.dataModelObjectRelationships;
+  },
+  async getDataModelObjectRelationshipsByModel(modelId: number): Promise<DataModelObjectRelationship[]> {
+    return store.dataModelObjectRelationships.filter((relationship) => relationship.modelId === modelId);
+  },
   async createAttribute(attribute: InsertAttribute): Promise<Attribute> {
     const newAttribute: Attribute = {
       id: ++counters.attribute,
@@ -267,11 +561,32 @@ const storageMock = {
     store.attributes.push(newAttribute);
     return newAttribute;
   },
+  async getAllAttributes(): Promise<Attribute[]> {
+    return store.attributes;
+  },
   async getAttributesByObject(objectId: number): Promise<Attribute[]> {
     return store.attributes.filter((attribute) => attribute.objectId === objectId);
   },
   async deleteAttributesByObject(objectId: number): Promise<void> {
     store.attributes = store.attributes.filter((attribute) => attribute.objectId !== objectId);
+  },
+  async getDataModelAttributes(): Promise<DataModelAttribute[]> {
+    return store.dataModelAttributes;
+  },
+  async getDataModelAttribute(id: number): Promise<DataModelAttribute | undefined> {
+    return store.dataModelAttributes.find((attribute) => attribute.id === id);
+  },
+  async getDataObjectRelationships(): Promise<DataObjectRelationship[]> {
+    return store.dataObjectRelationships;
+  },
+  async getDataObjectRelationship(id: number): Promise<DataObjectRelationship | undefined> {
+    return store.dataObjectRelationships.find((relationship) => relationship.id === id);
+  },
+  async getDataModelProperties(): Promise<DataModelProperty[]> {
+    return store.dataModelProperties;
+  },
+  async getDataModelPropertiesByEntity(entityType: string, entityId: number): Promise<DataModelProperty[]> {
+    return store.dataModelProperties.filter((property) => property.entityType === entityType && property.entityId === entityId);
   }
 };
 
@@ -439,5 +754,69 @@ describe("Data model creation APIs", () => {
         (modelObject.layerSpecificConfig as Record<string, any>).position !== undefined
       )
     ).toBe(true);
+  });
+
+  describe("GET /api/object-lake", () => {
+    it("returns aggregated objects with totals across layers", async () => {
+      const seeded = await seedObjectLakeData();
+
+      const response = await request(app).get("/api/object-lake").expect(200);
+
+      const body = response.body as {
+        objects: Array<{ name: string }>;
+        totals: { objectCount: number; attributeCount: number; relationshipCount: number; modelInstanceCount: number };
+      };
+
+      expect(body.objects).toHaveLength(2);
+      expect(body.objects.map((object) => object.name)).toEqual(
+        expect.arrayContaining([seeded.userObject.name, seeded.productObject.name])
+      );
+      expect(body.totals.objectCount).toBe(2);
+      expect(body.totals.attributeCount).toBeGreaterThan(0);
+      expect(body.totals.relationshipCount).toBeGreaterThan(0);
+      expect(body.totals.modelInstanceCount).toBeGreaterThan(0);
+    });
+
+    it("supports filtering by layer while respecting instance visibility", async () => {
+      const seeded = await seedObjectLakeData();
+
+      const response = await request(app)
+        .get("/api/object-lake?layer=logical")
+        .expect(200);
+
+      const body = response.body as { objects: Array<{ name: string; modelInstances: Array<{ model: { layer: string | null } | null }> }> };
+
+      expect(body.objects).toHaveLength(1);
+      expect(body.objects[0]?.name).toBe(seeded.userObject.name);
+      expect(
+        body.objects[0]?.modelInstances.some((instance) => instance.model?.layer === "logical")
+      ).toBe(true);
+    });
+
+    it("includes nested relationships, attributes, and properties in the payload", async () => {
+      const seeded = await seedObjectLakeData();
+
+      const response = await request(app).get("/api/object-lake").expect(200);
+
+      const body = response.body as {
+        objects: Array<{
+          name: string;
+          relationships: { global: unknown[]; modelSpecific: unknown[] };
+          attributes: Array<{ properties: unknown[] }>;
+          modelInstances: Array<{ properties: unknown[] }>;
+          properties: unknown[];
+        }>;
+      };
+
+      const userObject = body.objects.find((object) => object.name === seeded.userObject.name);
+      expect(userObject).toBeDefined();
+      expect(userObject?.relationships.global.length).toBeGreaterThan(0);
+      expect(userObject?.relationships.modelSpecific.length).toBeGreaterThan(0);
+      expect(userObject?.attributes.length).toBeGreaterThanOrEqual(2);
+      expect(userObject?.attributes.some((attribute) => attribute.properties.length > 0)).toBe(true);
+      expect(userObject?.properties.length).toBeGreaterThan(0);
+      expect(userObject?.modelInstances.length).toBeGreaterThan(0);
+      expect(userObject?.modelInstances.some((instance) => instance.properties.length > 0)).toBe(true);
+    });
   });
 });

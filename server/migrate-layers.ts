@@ -101,7 +101,7 @@ async function migrateDataToAllLayers() {
       }
 
       // Copy relationships to logical and physical layers
-      const conceptualRelationships = await storage.getRelationshipsByModel(conceptualModel.id);
+  const conceptualRelationships = await storage.getDataModelObjectRelationshipsByModel(conceptualModel.id);
       console.log(`Found ${conceptualRelationships.length} relationships in conceptual layer`);
 
       for (const rel of conceptualRelationships) {
@@ -112,7 +112,7 @@ async function migrateDataToAllLayers() {
 
         if (sourceLogicalObj && targetLogicalObj) {
           // Create relationship in logical layer
-          await storage.createRelationship({
+          await storage.createDataModelObjectRelationship({
             layer: "logical",
             sourceModelObjectId: sourceLogicalObj.id,
             targetModelObjectId: targetLogicalObj.id,
@@ -129,7 +129,7 @@ async function migrateDataToAllLayers() {
 
         if (sourcePhysicalObj && targetPhysicalObj) {
           // Create relationship in physical layer
-          await storage.createRelationship({
+          await storage.createDataModelObjectRelationship({
             layer: "physical",
             sourceModelObjectId: sourcePhysicalObj.id,
             targetModelObjectId: targetPhysicalObj.id,

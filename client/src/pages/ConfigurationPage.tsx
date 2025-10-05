@@ -70,7 +70,7 @@ export default function ConfigurationPage() {
       const response = await fetch("/api/areas");
       return response.json();
     }
-  });
+  }); 
 
   // Create/Update domain mutation
   const saveDomainMutation = useMutation({
@@ -195,7 +195,7 @@ export default function ConfigurationPage() {
     onError: (error: any) => {
       toast({
         title: "Failed to delete data area",
-        description: error?.message || "Unknown error occurred",
+        description: error?.message || "`1Unknown error occurred",
         variant: "destructive"
       });
     }

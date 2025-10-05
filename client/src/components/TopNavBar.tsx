@@ -81,7 +81,7 @@ export default function TopNavBar() {
       <div className="flex items-center space-x-1 sm:space-x-2 lg:space-x-4 min-w-0 flex-1">
         {/* Mobile Navigation - integrated into responsive design */}
         <div className="flex items-center space-x-2 min-w-0">
-          {isModelerRoute ? (
+          {isModelerRoute && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -99,27 +99,27 @@ export default function TopNavBar() {
                 <p>Back to models list</p>
               </TooltipContent>
             </Tooltip>
-          ) : (
-            <div className="md:hidden">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9"
-                    onClick={openNavigation}
-                    aria-label="Open navigation"
-                  >
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Open navigation</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
           )}
+
+          <div className="md:hidden">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={openNavigation}
+                  aria-label="Open navigation"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Open navigation</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
 
           {isModelerRoute && (
             <div className="sm:hidden max-w-[160px] truncate text-sm font-semibold text-foreground">
@@ -127,27 +127,25 @@ export default function TopNavBar() {
             </div>
           )}
 
-          {!isModelerRoute && (
-            <div className="hidden md:block">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9"
-                    onClick={toggleSidebarCollapse}
-                    aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                  >
-                    {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          )}
+          <div className="hidden md:block">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={toggleSidebarCollapse}
+                  aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+                >
+                  {isSidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
 
         </div>
 

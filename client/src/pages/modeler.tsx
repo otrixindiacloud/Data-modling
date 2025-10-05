@@ -19,6 +19,39 @@ import { Badge } from "@/components/ui/badge";
 import { useRoute } from "wouter";
 import type { DataModel } from "@shared/schema";
 
+const modelSharesRoot = (
+  model: DataModel | null,
+  rootCandidate: DataModel,
+  allModels: DataModel[]
+) => {
+  if (!model) return false;
+  if (model.id === rootCandidate.id) return true;
+
+  const visited = new Set<number>();
+  let pointer: DataModel | null | undefined = model;
+
+  while (pointer?.parentModelId) {
+    if (visited.has(pointer.parentModelId)) {
+      break;
+    }
+
+    visited.add(pointer.parentModelId);
+    const parent = allModels.find((m) => m.id === pointer?.parentModelId) ?? null;
+
+    if (!parent) {
+      break;
+    }
+
+    if (parent.id === rootCandidate.id) {
+      return true;
+    }
+
+    pointer = parent;
+  }
+
+  return false;
+};
+
 export default function ModelerPage() {
   const {
     setDomains,
@@ -34,6 +67,7 @@ export default function ModelerPage() {
   const [showMobileProperties, setShowMobileProperties] = useState(false);
   const [showMobileDataSources, setShowMobileDataSources] = useState(false);
   const [dataExplorerCollapsed, setDataExplorerCollapsed] = useState(false);
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const { widths, updateWidths } = usePanelWidths();
   const [showModelRequiredModal, setShowModelRequiredModal] = useState(false);
   const [modelRequiredMessage, setModelRequiredMessage] = useState<string | null>(null);
@@ -96,8 +130,13 @@ export default function ModelerPage() {
       );
     }
 
-    if (targetModel && (!currentModel || currentModel.id !== targetModel.id)) {
-      setCurrentModel(targetModel);
+    if (targetModel) {
+      const typedModelsList = typedModels;
+      const isSameFamily = modelSharesRoot(currentModel, targetModel, typedModelsList);
+
+      if (!currentModel || !isSameFamily) {
+        setCurrentModel(targetModel);
+      }
     }
   }, [matchModelRoute, routeParams, models, currentModel, setCurrentModel]);
 
@@ -172,6 +211,10 @@ export default function ModelerPage() {
     setDataExplorerCollapsed(!dataExplorerCollapsed);
   };
 
+  const handleToggleProperties = () => {
+    setPropertiesCollapsed((prev) => !prev);
+  };
+
   const handleLayerChange = (layer: "conceptual" | "logical" | "physical") => {
     setCurrentLayer(layer);
     console.log("Layer changed to:", layer);
@@ -220,24 +263,32 @@ export default function ModelerPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Desktop layout with resizable panels - xl screens (3 panels) */}
-        <div className="hidden xl:flex h-full">
-          <PanelGroup direction="horizontal" className="flex-1 min-h-0" onLayout={(sizes) => {
-            const [dataExplorer, canvas, properties] = sizes;
-            updateWidths({ 
-              dataExplorer: dataExplorer || (dataExplorerCollapsed ? 4 : 25), 
-              canvas: canvas || 50, 
-              properties: properties || 25 
-            });
-          }}>
+    {/* Desktop layout with resizable panels - xl screens (3 panels) */}
+    <div className="hidden xl:flex h-full w-full">
+          <PanelGroup
+            direction="horizontal"
+            className="flex-1 min-h-0"
+            onLayout={(sizes) => {
+              const [dataExplorer, canvas, properties] = sizes;
+              updateWidths({
+                dataExplorer: dataExplorer || (dataExplorerCollapsed ? 4 : 25),
+                canvas: canvas || 50,
+                properties: propertiesCollapsed
+                  ? widths.properties
+                  : properties || widths.properties || 25
+              });
+            }}
+          >
             {/* Data Explorer Panel */}
             <Panel 
+              id="desktop-data-explorer"
+              order={1}
               defaultSize={dataExplorerCollapsed ? 4 : widths.dataExplorer} 
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
-              className="min-h-0"
+              className="flex min-h-0"
             >
-              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 min-h-0 flex">
                 <DataObjectExplorer 
                   isCollapsed={dataExplorerCollapsed}
                   onToggleCollapse={handleToggleDataExplorer}
@@ -253,28 +304,38 @@ export default function ModelerPage() {
             )}
             
             {/* Main Canvas Panel */}
-            <Panel defaultSize={widths.canvas} minSize={30} className="min-h-0">
-              <div className="relative h-full w-full overflow-hidden">
-                <div className="h-full w-full">
-                  <Canvas />
-                </div>
-              </div>
+            <Panel id="desktop-modeler-canvas" order={2} defaultSize={widths.canvas} minSize={30} className="h-full overflow-hidden">
+                <Canvas />
             </Panel>
             
             {/* Resize Handle */}
-            <PanelResizeHandle className="w-1 bg-border hover:bg-border/80 transition-colors cursor-col-resize flex items-center justify-center group">
-              <div className="w-0.5 h-8 bg-border/60 group-hover:bg-border transition-colors rounded-full" />
-            </PanelResizeHandle>
-            
+            {!propertiesCollapsed && (
+              <PanelResizeHandle className="w-1 bg-border hover:bg-border/80 transition-colors cursor-col-resize flex items-center justify-center group">
+                <div className="w-0.5 h-8 bg-border/60 group-hover:bg-border transition-colors rounded-full" />
+              </PanelResizeHandle>
+            )}
+
             {/* Properties Panel */}
-            <Panel defaultSize={widths.properties} minSize={15} maxSize={35} className="min-h-0 overflow-hidden">
-              <EnhancedPropertiesPanel />
+            <Panel
+              id="desktop-properties-panel"
+              order={3}
+              defaultSize={propertiesCollapsed ? 4 : widths.properties}
+              minSize={propertiesCollapsed ? 4 : 15}
+              maxSize={propertiesCollapsed ? 6 : 35}
+              className="min-h-0"
+            >
+              <div className="h-full w-full min-h-0 flex flex-col overflow-hidden">
+                <EnhancedPropertiesPanel
+                  isCollapsed={propertiesCollapsed}
+                  onToggleCollapse={handleToggleProperties}
+                />
+              </div>
             </Panel>
           </PanelGroup>
         </div>
 
-        {/* Desktop layout with resizable panels - lg to xl screens (2 panels + collapsible data explorer) */}
-        <div className="hidden lg:flex xl:hidden h-full">
+    {/* Desktop layout with resizable panels - lg to xl screens (2 panels + collapsible data explorer) */}
+    <div className="hidden lg:flex xl:hidden h-full w-full">
           <PanelGroup direction="horizontal" className="flex-1 min-h-0" onLayout={(sizes) => {
             const [dataExplorer, canvas] = sizes;
             updateWidths({ 
@@ -285,12 +346,14 @@ export default function ModelerPage() {
           }}>
             {/* Data Explorer Panel */}
             <Panel 
+              id="compact-data-explorer"
+              order={1}
               defaultSize={dataExplorerCollapsed ? 4 : 30} 
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
-              className="min-h-0"
+              className="flex min-h-0"
             >
-              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 min-h-0 flex">
                 <DataObjectExplorer 
                   isCollapsed={dataExplorerCollapsed}
                   onToggleCollapse={handleToggleDataExplorer}
@@ -306,11 +369,9 @@ export default function ModelerPage() {
             )}
             
             {/* Main Canvas Panel */}
-            <Panel defaultSize={70} minSize={60} className="min-h-0">
-              <div className="relative h-full w-full overflow-hidden">
-                <div className="h-full w-full">
-                  <Canvas />
-                </div>
+            <Panel id="compact-modeler-canvas" order={2} defaultSize={70} minSize={60} className="min-h-0 flex">
+              <div className="relative flex-1 h-full overflow-hidden">
+                <Canvas />
               </div>
             </Panel>
           </PanelGroup>
@@ -336,7 +397,7 @@ export default function ModelerPage() {
                   <SheetHeader className="p-4 border-b border-border bg-card">
                     <SheetTitle className="text-left">Data Sources</SheetTitle>
                   </SheetHeader>
-                  <div className="h-full overflow-y-auto">
+                  <div className="h-full overflow-hidden">
                     <DataObjectExplorer 
                       isCollapsed={false}
                       onToggleCollapse={() => {}}
@@ -387,7 +448,7 @@ export default function ModelerPage() {
             <SheetHeader className="p-4 border-b border-border bg-card shadow-soft">
               <SheetTitle className="text-left">Properties</SheetTitle>
             </SheetHeader>
-            <div className="h-full overflow-y-auto">
+            <div className="h-full overflow-hidden">
               <EnhancedPropertiesPanel onClose={() => setShowMobileProperties(false)} />
             </div>
           </SheetContent>

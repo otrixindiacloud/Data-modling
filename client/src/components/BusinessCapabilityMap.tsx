@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,8 +33,12 @@ import {
   Save,
   Plus,
   Trash2,
-  Loader2
+  Loader2,
+  FileDown,
+  ImageDown
 } from "lucide-react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { ResponsiveContainer, Treemap, Tooltip as RechartsTooltip, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 import type { TooltipProps } from "recharts";
 import { colord } from "colord";
@@ -122,6 +126,29 @@ interface SystemSummary {
   description?: string;
 }
 
+interface CapabilitySystemMappingResponse {
+  capabilityId: number;
+  systemId: number;
+  mappingType: string;
+  systemRole: string;
+  coverage: string;
+  systemName: string;
+  systemCategory?: string | null;
+  systemType?: string | null;
+  systemColorCode?: string | null;
+}
+
+interface CapabilitySystemLink {
+  systemId: number;
+  name: string;
+  category?: string;
+  type?: string;
+  colorCode?: string;
+  mappingType: string;
+  systemRole: string;
+  coverage: string;
+}
+
 type RoadmapHorizon = "now" | "next" | "later";
 
 interface CapabilityMetric {
@@ -150,6 +177,7 @@ interface InfographicColumnSection {
   borderColor: string;
   accentColor: string;
   tertiary: BusinessCapability[];
+  systems: CapabilitySystemLink[];
 }
 
 interface InfographicColumnData {
@@ -159,6 +187,7 @@ interface InfographicColumnData {
   chipColor: string;
   softBackground: string;
   sections: InfographicColumnSection[];
+  systems: CapabilitySystemLink[];
 }
 
 const fallbackInfographicColors = [
@@ -475,6 +504,7 @@ export const BusinessCapabilityMap: React.FC = () => {
     dataAreas: [],
     systems: []
   });
+  const [capabilitySystemsIndex, setCapabilitySystemsIndex] = useState<Record<number, CapabilitySystemLink[]>>({});
   const [activeView, setActiveView] = useState<string>("infographic");
   const [loading, setLoading] = useState(true);
   const [domains, setDomains] = useState<DataDomainSummary[]>([]);
@@ -528,11 +558,18 @@ export const BusinessCapabilityMap: React.FC = () => {
     coverage: "full",
     description: "",
   });
+  const [exportingInfographic, setExportingInfographic] = useState<"png" | "pdf" | null>(null);
+  const infographicExportRef = useRef<HTMLDivElement | null>(null);
+  const infographicScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
     fetchCapabilityTree();
     loadReferenceData();
+  }, []);
+
+  useEffect(() => {
+    loadCapabilitySystemsMap();
   }, []);
 
   useEffect(() => {
@@ -590,6 +627,84 @@ export const BusinessCapabilityMap: React.FC = () => {
     }
   };
 
+  const loadCapabilitySystemsMap = useCallback(async () => {
+    try {
+      const response = await fetch("/api/capabilities/system-mappings", {
+        cache: "no-store",
+      });
+
+      if (response.status === 304) {
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Failed to load capability system mappings");
+      }
+
+      const data: CapabilitySystemMappingResponse[] = await response.json();
+      const map: Record<number, CapabilitySystemLink[]> = {};
+
+      data.forEach((entry) => {
+        if (!entry.systemId || !entry.systemName) {
+          return;
+        }
+
+        if (!map[entry.capabilityId]) {
+          map[entry.capabilityId] = [];
+        }
+
+        const existing = map[entry.capabilityId];
+        const duplicate = existing.some(
+          (system) =>
+            system.systemId === entry.systemId &&
+            system.systemRole === entry.systemRole &&
+            system.mappingType === entry.mappingType
+        );
+
+        if (!duplicate) {
+          existing.push({
+            systemId: entry.systemId,
+            name: entry.systemName,
+            category: entry.systemCategory ?? undefined,
+            type: entry.systemType ?? undefined,
+            colorCode: entry.systemColorCode ?? undefined,
+            mappingType: entry.mappingType,
+            systemRole: entry.systemRole,
+            coverage: entry.coverage,
+          });
+        }
+      });
+
+      Object.values(map).forEach((systems) => {
+        const roleWeight = (role: string) => {
+          switch (role) {
+            case "primary":
+              return 0;
+            case "secondary":
+              return 1;
+            default:
+              return 2;
+          }
+        };
+
+        systems.sort((a, b) => {
+          const roleDiff = roleWeight(a.systemRole) - roleWeight(b.systemRole);
+          if (roleDiff !== 0) return roleDiff;
+          return a.name.localeCompare(b.name);
+        });
+      });
+
+      setCapabilitySystemsIndex(map);
+    } catch (error) {
+      console.error("Error loading capability system mappings:", error);
+      toast({
+        title: "Warning",
+        description: "Unable to load linked systems for capabilities.",
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
   const loadReferenceData = async () => {
     try {
       const [domainsResponse, areasResponse, systemsResponse] = await Promise.all([
@@ -620,6 +735,121 @@ export const BusinessCapabilityMap: React.FC = () => {
       });
     }
   };
+
+  const captureInfographicCanvas = useCallback(async (): Promise<HTMLCanvasElement> => {
+    if (!infographicExportRef.current) {
+      throw new Error("Infographic view is not ready for export");
+    }
+
+    const wrapper = infographicExportRef.current;
+    const scrollContainer = infographicScrollContainerRef.current;
+
+    const originalOverflowX = scrollContainer?.style.overflowX;
+    const originalWidth = scrollContainer?.style.width;
+
+    if (scrollContainer) {
+      scrollContainer.style.overflowX = "visible";
+      scrollContainer.style.width = `${scrollContainer.scrollWidth}px`;
+    }
+
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const backgroundColor = getComputedStyle(document.body).backgroundColor || "#ffffff";
+
+    const canvas = await html2canvas(wrapper, {
+      backgroundColor,
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      width: wrapper.scrollWidth,
+      height: wrapper.scrollHeight,
+      windowWidth: wrapper.scrollWidth,
+      windowHeight: wrapper.scrollHeight,
+    });
+
+    if (scrollContainer) {
+      scrollContainer.style.overflowX = originalOverflowX ?? "";
+      scrollContainer.style.width = originalWidth ?? "";
+    }
+
+    return canvas;
+  }, []);
+
+  const handleExportInfographicImage = useCallback(async () => {
+    if (exportingInfographic) return;
+
+    if (!infographicExportRef.current) {
+      toast({
+        title: "Export unavailable",
+        description: "The infographic view is not ready yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExportingInfographic("png");
+    try {
+      const canvas = await captureInfographicCanvas();
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = `capability-infographic-${new Date().toISOString().split("T")[0]}.png`;
+      link.click();
+    } catch (error) {
+      console.error("Error exporting infographic as image:", error);
+      toast({
+        title: "Export failed",
+        description: "Unable to capture the infographic as an image.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingInfographic(null);
+    }
+  }, [captureInfographicCanvas, exportingInfographic, toast]);
+
+  const handleExportInfographicPdf = useCallback(async () => {
+    if (exportingInfographic) return;
+
+    if (!infographicExportRef.current) {
+      toast({
+        title: "Export unavailable",
+        description: "The infographic view is not ready yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setExportingInfographic("pdf");
+    try {
+      const canvas = await captureInfographicCanvas();
+      const imgData = canvas.toDataURL("image/png");
+      const orientation = canvas.width >= canvas.height ? "landscape" : "portrait";
+      const pdf = new jsPDF({
+        orientation,
+        unit: "pt",
+        format: "a4",
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+      const renderWidth = canvas.width * scale;
+      const renderHeight = canvas.height * scale;
+      const offsetX = (pageWidth - renderWidth) / 2;
+      const offsetY = (pageHeight - renderHeight) / 2;
+
+      pdf.addImage(imgData, "PNG", offsetX, offsetY, renderWidth, renderHeight);
+      pdf.save(`capability-infographic-${new Date().toISOString().split("T")[0]}.pdf`);
+    } catch (error) {
+      console.error("Error exporting infographic as PDF:", error);
+      toast({
+        title: "Export failed",
+        description: "Unable to generate the infographic PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingInfographic(null);
+    }
+  }, [captureInfographicCanvas, exportingInfographic, toast]);
 
   const setSelectedCapabilityById = (capabilityId?: number | null, tree?: BusinessCapability[]) => {
     if (!capabilityId) {
@@ -770,8 +1000,9 @@ export const BusinessCapabilityMap: React.FC = () => {
         description: `${updated.name} has been saved successfully.`,
       });
 
-  await fetchCapabilityTree(updated.id);
+    await fetchCapabilityTree(updated.id);
       await loadCapabilityMappings(updated.id);
+      await loadCapabilitySystemsMap();
     } catch (error) {
       console.error("Error updating capability:", error);
       toast({
@@ -844,7 +1075,8 @@ export const BusinessCapabilityMap: React.FC = () => {
         sortOrder: "",
       }));
 
-  await fetchCapabilityTree(created.id);
+    await fetchCapabilityTree(created.id);
+    await loadCapabilitySystemsMap();
     } catch (error) {
       console.error("Error creating capability:", error);
       toast({
@@ -878,7 +1110,8 @@ export const BusinessCapabilityMap: React.FC = () => {
 
       const parentId = selectedCapability.parentId;
       setSelectedCapability(undefined);
-  await fetchCapabilityTree(parentId ?? undefined);
+    await fetchCapabilityTree(parentId ?? undefined);
+      await loadCapabilitySystemsMap();
     } catch (error) {
       console.error("Error deleting capability:", error);
       toast({
@@ -1047,6 +1280,7 @@ export const BusinessCapabilityMap: React.FC = () => {
       });
 
       await loadCapabilityMappings(selectedCapability.id);
+      await loadCapabilitySystemsMap();
     } catch (error) {
       console.error("Error creating system mapping:", error);
       toast({
@@ -1136,6 +1370,7 @@ export const BusinessCapabilityMap: React.FC = () => {
       });
 
       await loadCapabilityMappings(selectedCapability.id);
+      await loadCapabilitySystemsMap();
     } catch (error) {
       console.error("Error removing system mapping:", error);
       toast({
@@ -1330,6 +1565,7 @@ export const BusinessCapabilityMap: React.FC = () => {
       const headerColor = colord(baseColor).saturate(0.1).darken(0.08).toHex();
       const chipColor = colord(baseColor).lighten(0.25).desaturate(0.2).alpha(0.2).toRgbString();
       const softBackground = colord(baseColor).lighten(0.6).desaturate(0.35).alpha(0.18).toRgbString();
+      const domainSystems = capabilitySystemsIndex[domain.id] ?? [];
 
       const sections: InfographicColumnSection[] = (domain.children ?? []).map((child, childIndex) => {
         const lightenAmount = Math.min(0.65, 0.38 + childIndex * 0.08);
@@ -1342,6 +1578,7 @@ export const BusinessCapabilityMap: React.FC = () => {
           .lighten(Math.min(0.22 + childIndex * 0.06, 0.45))
           .saturate(0.05)
           .toHex();
+        const systems = capabilitySystemsIndex[child.id] ?? [];
 
         return {
           capability: child,
@@ -1349,6 +1586,7 @@ export const BusinessCapabilityMap: React.FC = () => {
           borderColor,
           accentColor,
           tertiary: child.children ?? [],
+          systems,
         };
       });
 
@@ -1359,9 +1597,10 @@ export const BusinessCapabilityMap: React.FC = () => {
         chipColor,
         softBackground,
         sections,
+        systems: domainSystems,
       } satisfies InfographicColumnData;
     });
-  }, [domainColumns]);
+  }, [domainColumns, capabilitySystemsIndex]);
 
   const selectedMetrics = selectedCapability
     ? metricsById.get(selectedCapability.id)
@@ -1485,17 +1724,49 @@ export const BusinessCapabilityMap: React.FC = () => {
                   </TabsList>
 
                   <TabsContent value="infographic">
-                    <div className="space-y-4">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-sm text-muted-foreground">
-                          Explore the full capability landscape in an infographic view inspired by LeanIX best practices.
-                        </p>
-                        <Badge variant="outline" className="w-fit">
-                          {capabilityDomainCount} capability domains
-                        </Badge>
+                    <div ref={infographicExportRef} className="space-y-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-2">
+                          <p className="text-sm text-muted-foreground">
+                            Explore the full capability landscape in an infographic view inspired by LeanIX best practices.
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="w-fit">
+                              {capabilityDomainCount} capability domains
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleExportInfographicImage}
+                            disabled={Boolean(exportingInfographic)}
+                          >
+                            {exportingInfographic === "png" ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <ImageDown className="mr-2 h-4 w-4" />
+                            )}
+                            {exportingInfographic === "png" ? "Exporting PNG..." : "Export PNG"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleExportInfographicPdf}
+                            disabled={Boolean(exportingInfographic)}
+                          >
+                            {exportingInfographic === "pdf" ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <FileDown className="mr-2 h-4 w-4" />
+                            )}
+                            {exportingInfographic === "pdf" ? "Exporting PDF..." : "Export PDF"}
+                          </Button>
+                        </div>
                       </div>
                       <div className="relative">
-                        <div className="overflow-x-auto w-full pb-3">
+                        <div ref={infographicScrollContainerRef} className="overflow-x-auto w-full pb-3">
                           <div
                             className="flex gap-4"
                             style={{
@@ -2433,6 +2704,31 @@ const InfographicColumn: React.FC<InfographicColumnProps> = ({ data, onSelect, s
             </span>
           )}
         </div>
+        {data.systems.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {data.systems.slice(0, 3).map((system) => {
+              const tint = system.colorCode ? colord(system.colorCode) : baseTone;
+              const background = tint.alpha(0.22).toRgbString();
+              const border = tint.alpha(0.45).toRgbString();
+              const text = tint.isDark() ? tint.lighten(0.6).toHex() : tint.darken(0.2).toHex();
+
+              return (
+                <span
+                  key={`root-system-${data.root.id}-${system.systemId}`}
+                  className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{ background, borderColor: border, color: text }}
+                >
+                  {system.name}
+                </span>
+              );
+            })}
+            {data.systems.length > 3 && (
+              <span className="text-[11px] font-medium text-white/80">
+                +{data.systems.length - 3} more
+              </span>
+            )}
+          </div>
+        )}
       </button>
 
       <div className="flex flex-1 flex-col gap-3 p-3" style={{ background: data.softBackground }}>
@@ -2463,6 +2759,33 @@ const InfographicColumn: React.FC<InfographicColumnProps> = ({ data, onSelect, s
                         <p className="mt-1 text-xs leading-snug text-slate-700/80">
                           {section.capability.description}
                         </p>
+                      )}
+                      {section.systems.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {section.systems.slice(0, 2).map((system) => {
+                            const systemColor = system.colorCode ? colord(system.colorCode) : accent;
+                            const chipBackground = systemColor.alpha(0.18).toRgbString();
+                            const chipBorder = systemColor.alpha(0.35).toRgbString();
+                            const chipText = systemColor.isDark()
+                              ? systemColor.lighten(0.6).toHex()
+                              : systemColor.darken(0.25).toHex();
+
+                            return (
+                              <span
+                                key={`section-system-${section.capability.id}-${system.systemId}`}
+                                className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                                style={{ background: chipBackground, borderColor: chipBorder, color: chipText }}
+                              >
+                                {system.name}
+                              </span>
+                            );
+                          })}
+                          {section.systems.length > 2 && (
+                            <span className="text-[11px] text-slate-700/80">
+                              +{section.systems.length - 2} more
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                     <Badge

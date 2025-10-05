@@ -7,7 +7,8 @@ import {
   attributes,
   dataModelAttributes,
   dataModelProperties,
-  relationships,
+  dataObjectRelationships,
+  dataModelObjectRelationships,
   systems,
   configurations,
   businessCapabilities,
@@ -30,8 +31,10 @@ import {
   type InsertDataModelAttribute,
   type DataModelProperty,
   type InsertDataModelProperty,
-  type Relationship,
-  type InsertRelationship,
+  type DataObjectRelationship,
+  type InsertDataObjectRelationship,
+  type DataModelObjectRelationship,
+  type InsertDataModelObjectRelationship,
   type System,
   type InsertSystem,
   type Configuration,
@@ -46,7 +49,19 @@ import {
   type InsertCapabilitySystemMapping,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
+
+export interface CapabilitySystemMappingDetail {
+  capabilityId: number;
+  systemId: number;
+  mappingType: string;
+  systemRole: string;
+  coverage: string;
+  systemName: string;
+  systemCategory: string | null;
+  systemType: string | null;
+  systemColorCode: string | null;
+}
 
 export interface IStorage {
   // Data Models
@@ -110,13 +125,26 @@ export interface IStorage {
   updateDataModelAttribute(id: number, attribute: Partial<InsertDataModelAttribute>): Promise<DataModelAttribute>;
   deleteDataModelAttribute(id: number): Promise<void>;
 
-  // Relationships
-  getRelationships(): Promise<Relationship[]>;
-  getRelationship(id: number): Promise<Relationship | undefined>;
-  getRelationshipsByModel(modelId: number): Promise<Relationship[]>;
-  createRelationship(relationship: InsertRelationship): Promise<Relationship>;
-  updateRelationship(id: number, relationship: Partial<InsertRelationship>): Promise<Relationship>;
-  deleteRelationship(id: number): Promise<void>;
+  // Data Model Properties
+  getDataModelProperties(): Promise<DataModelProperty[]>;
+  getDataModelPropertiesByEntity(entityType: string, entityId: number): Promise<DataModelProperty[]>;
+
+  // Data Object Relationships
+  getDataObjectRelationships(): Promise<DataObjectRelationship[]>;
+  getDataObjectRelationship(id: number): Promise<DataObjectRelationship | undefined>;
+  getDataObjectRelationshipsByObject(objectId: number): Promise<DataObjectRelationship[]>;
+  createDataObjectRelationship(relationship: InsertDataObjectRelationship): Promise<DataObjectRelationship>;
+  updateDataObjectRelationship(id: number, relationship: Partial<InsertDataObjectRelationship>): Promise<DataObjectRelationship>;
+  deleteDataObjectRelationship(id: number): Promise<void>;
+  deleteDataObjectRelationshipsByObject(objectId: number): Promise<void>;
+
+  // Data Model Object Relationships
+  getDataModelObjectRelationships(): Promise<DataModelObjectRelationship[]>;
+  getDataModelObjectRelationship(id: number): Promise<DataModelObjectRelationship | undefined>;
+  getDataModelObjectRelationshipsByModel(modelId: number): Promise<DataModelObjectRelationship[]>;
+  createDataModelObjectRelationship(relationship: InsertDataModelObjectRelationship): Promise<DataModelObjectRelationship>;
+  updateDataModelObjectRelationship(id: number, relationship: Partial<InsertDataModelObjectRelationship>): Promise<DataModelObjectRelationship>;
+  deleteDataModelObjectRelationship(id: number): Promise<void>;
 
   // Systems
   getSystems(): Promise<System[]>;
@@ -139,6 +167,7 @@ export interface IStorage {
   getBusinessCapability(id: number): Promise<BusinessCapability | undefined>;
   getBusinessCapabilityTree(): Promise<any>;
   getCapabilityMappings(capabilityId: number): Promise<any>;
+  getAllCapabilitySystemMappings(): Promise<CapabilitySystemMappingDetail[]>;
   createBusinessCapability(capability: InsertBusinessCapability): Promise<BusinessCapability>;
   updateBusinessCapability(id: number, capability: Partial<InsertBusinessCapability>): Promise<BusinessCapability>;
   deleteBusinessCapability(id: number): Promise<void>;
@@ -389,32 +418,121 @@ export class Storage implements IStorage {
     await db.delete(dataModelAttributes).where(eq(dataModelAttributes.id, id));
   }
 
-  // Relationships
-  async getRelationships(): Promise<Relationship[]> {
-    return await db.select().from(relationships);
+  // Data Model Properties
+  async getDataModelProperties(): Promise<DataModelProperty[]> {
+    return await db.select().from(dataModelProperties);
   }
 
-  async getRelationship(id: number): Promise<Relationship | undefined> {
-    const result = await db.select().from(relationships).where(eq(relationships.id, id));
+  async getDataModelPropertiesByEntity(entityType: string, entityId: number): Promise<DataModelProperty[]> {
+    return await db
+      .select()
+      .from(dataModelProperties)
+      .where(
+        and(
+          eq(dataModelProperties.entityType, entityType),
+          eq(dataModelProperties.entityId, entityId)
+        )
+      );
+  }
+
+  // Data Object Relationships
+  async getDataObjectRelationships(): Promise<DataObjectRelationship[]> {
+    return await db.select().from(dataObjectRelationships);
+  }
+
+  async getDataObjectRelationship(id: number): Promise<DataObjectRelationship | undefined> {
+    const result = await db
+      .select()
+      .from(dataObjectRelationships)
+      .where(eq(dataObjectRelationships.id, id));
     return result[0];
   }
 
-  async getRelationshipsByModel(modelId: number): Promise<Relationship[]> {
-    return await db.select().from(relationships).where(eq(relationships.modelId, modelId));
+  async getDataObjectRelationshipsByObject(objectId: number): Promise<DataObjectRelationship[]> {
+    return await db
+      .select()
+      .from(dataObjectRelationships)
+      .where(
+        or(
+          eq(dataObjectRelationships.sourceDataObjectId, objectId),
+          eq(dataObjectRelationships.targetDataObjectId, objectId)
+        )
+      );
   }
 
-  async createRelationship(relationship: InsertRelationship): Promise<Relationship> {
-    const result = await db.insert(relationships).values(relationship).returning();
+  async createDataObjectRelationship(relationship: InsertDataObjectRelationship): Promise<DataObjectRelationship> {
+    const result = await db.insert(dataObjectRelationships).values(relationship).returning();
     return result[0];
   }
 
-  async updateRelationship(id: number, relationship: Partial<InsertRelationship>): Promise<Relationship> {
-    const result = await db.update(relationships).set(relationship).where(eq(relationships.id, id)).returning();
+  async updateDataObjectRelationship(
+    id: number,
+    relationship: Partial<InsertDataObjectRelationship>
+  ): Promise<DataObjectRelationship> {
+    const result = await db
+      .update(dataObjectRelationships)
+      .set(relationship)
+      .where(eq(dataObjectRelationships.id, id))
+      .returning();
     return result[0];
   }
 
-  async deleteRelationship(id: number): Promise<void> {
-    await db.delete(relationships).where(eq(relationships.id, id));
+  async deleteDataObjectRelationship(id: number): Promise<void> {
+    await db.delete(dataObjectRelationships).where(eq(dataObjectRelationships.id, id));
+  }
+
+  async deleteDataObjectRelationshipsByObject(objectId: number): Promise<void> {
+    await db
+      .delete(dataObjectRelationships)
+      .where(
+        or(
+          eq(dataObjectRelationships.sourceDataObjectId, objectId),
+          eq(dataObjectRelationships.targetDataObjectId, objectId)
+        )
+      );
+  }
+
+  // Data Model Object Relationships
+  async getDataModelObjectRelationships(): Promise<DataModelObjectRelationship[]> {
+    return await db.select().from(dataModelObjectRelationships);
+  }
+
+  async getDataModelObjectRelationship(id: number): Promise<DataModelObjectRelationship | undefined> {
+    const result = await db
+      .select()
+      .from(dataModelObjectRelationships)
+      .where(eq(dataModelObjectRelationships.id, id));
+    return result[0];
+  }
+
+  async getDataModelObjectRelationshipsByModel(modelId: number): Promise<DataModelObjectRelationship[]> {
+    return await db
+      .select()
+      .from(dataModelObjectRelationships)
+      .where(eq(dataModelObjectRelationships.modelId, modelId));
+  }
+
+  async createDataModelObjectRelationship(
+    relationship: InsertDataModelObjectRelationship
+  ): Promise<DataModelObjectRelationship> {
+    const result = await db.insert(dataModelObjectRelationships).values(relationship).returning();
+    return result[0];
+  }
+
+  async updateDataModelObjectRelationship(
+    id: number,
+    relationship: Partial<InsertDataModelObjectRelationship>
+  ): Promise<DataModelObjectRelationship> {
+    const result = await db
+      .update(dataModelObjectRelationships)
+      .set(relationship)
+      .where(eq(dataModelObjectRelationships.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteDataModelObjectRelationship(id: number): Promise<void> {
+    await db.delete(dataModelObjectRelationships).where(eq(dataModelObjectRelationships.id, id));
   }
 
   // Systems
@@ -561,6 +679,25 @@ export class Storage implements IStorage {
       dataAreas: datAreaMappings,
       systems: systemMappings,
     };
+  }
+
+  async getAllCapabilitySystemMappings(): Promise<CapabilitySystemMappingDetail[]> {
+    const mappings = await db
+      .select({
+        capabilityId: capabilitySystemMappings.capabilityId,
+        systemId: capabilitySystemMappings.systemId,
+        mappingType: capabilitySystemMappings.mappingType,
+        systemRole: capabilitySystemMappings.systemRole,
+        coverage: capabilitySystemMappings.coverage,
+        systemName: systems.name,
+        systemCategory: systems.category,
+        systemType: systems.type,
+        systemColorCode: systems.colorCode,
+      })
+      .from(capabilitySystemMappings)
+      .innerJoin(systems, eq(capabilitySystemMappings.systemId, systems.id));
+
+    return mappings;
   }
 
   async createBusinessCapability(capability: InsertBusinessCapability): Promise<BusinessCapability> {

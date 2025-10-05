@@ -298,7 +298,7 @@ const ConfigurationImportExport: React.FC<ConfigurationImportExportProps> = ({ o
         const data = JSON.parse(e.target?.result as string);
         
         // Validate the configuration file structure
-        if (!data.configurations || typeof data.configurations !== 'object') {
+        if (!data b  .configurations || typeof data.configurations !== 'object') {
           throw new Error("Invalid configuration file format");
         }
         

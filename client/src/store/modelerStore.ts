@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { ModelLayer, CanvasNode, CanvasEdge, AISuggestion, DataSourceConnection } from "@/types/modeler";
-import { DataModel, DataObject, Attribute, Relationship, DataDomain, DataArea } from "@shared/schema";
+import { DataModel, DataObject, Attribute, DataDomain, DataArea } from "@shared/schema";
 
 interface HistoryEntry {
   id: string;

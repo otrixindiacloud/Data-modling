@@ -1,13 +1,15 @@
 import { useLocation } from "wouter";
-import { Home, Layers3, Server, Settings, BarChart3, Building2 } from "lucide-react";
+import { Home, Layers3, Server, Settings, BarChart3, Building2, Database, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 
 interface AppSidebarProps {
   onNavigate?: () => void;
   collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 interface NavItem {
@@ -40,6 +42,12 @@ const NAV_ITEMS: NavItem[] = [
     icon: Server,
   },
   {
+    label: "Object Lake",
+    href: "/object-lake",
+    icon: Database,
+    description: "Unified object management"
+  },
+  {
     label: "Configurations",
     href: "/configuration",
     icon: Settings,
@@ -51,7 +59,7 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-export function AppSidebar({ onNavigate, collapsed = false }: AppSidebarProps) {
+export function AppSidebar({ onNavigate, collapsed = false, onToggleCollapse }: AppSidebarProps) {
   const [location, setLocation] = useLocation();
 
   const handleNavigate = (href: string) => {
@@ -73,30 +81,54 @@ export function AppSidebar({ onNavigate, collapsed = false }: AppSidebarProps) {
             collapsed && "px-2"
           )}
         >
-          <div
-            className={cn(
-              "flex items-center gap-3 transition-all duration-300",
-              collapsed && "justify-center gap-0"
-            )}
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-700 shadow-lg ring-1 ring-white/20 dark:ring-white/10">
-              <svg width="20" height="20" viewBox="0 0 32 32" fill="none" className="text-white">
-                <path
-                  d="M4 4 L4 28 L16 28 Q24 28 28 20 Q28 16 28 12 Q24 4 16 4 Z"
-                  fill="currentColor"
-                  fillOpacity="0.9"
-                />
-                <circle cx="20" cy="12" r="2" fill="currentColor" fillOpacity="0.7" />
-                <circle cx="16" cy="16" r="1.5" fill="currentColor" fillOpacity="0.6" />
-                <circle cx="12" cy="20" r="1" fill="currentColor" fillOpacity="0.5" />
-                <path d="M20 12 L16 16 L12 20" stroke="currentColor" strokeWidth="1" strokeOpacity="0.4" />
-              </svg>
-            </div>
-            {!collapsed && (
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">DArk Modeler</h2>
-                <p className="text-xs text-muted-foreground">AI-Powered Data Architecture</p>
+          <div className="flex items-center gap-2">
+            <div
+              className={cn(
+                "flex flex-1 items-center gap-3 transition-all duration-300",
+                collapsed && "justify-center gap-0"
+              )}
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-700 shadow-lg ring-1 ring-white/20 dark:ring-white/10">
+                <svg width="20" height="20" viewBox="0 0 32 32" fill="none" className="text-white">
+                  <path
+                    d="M4 4 L4 28 L16 28 Q24 28 28 20 Q28 16 28 12 Q24 4 16 4 Z"
+                    fill="currentColor"
+                    fillOpacity="0.9"
+                  />
+                  <circle cx="20" cy="12" r="2" fill="currentColor" fillOpacity="0.7" />
+                  <circle cx="16" cy="16" r="1.5" fill="currentColor" fillOpacity="0.6" />
+                  <circle cx="12" cy="20" r="1" fill="currentColor" fillOpacity="0.5" />
+                  <path d="M20 12 L16 16 L12 20" stroke="currentColor" strokeWidth="1" strokeOpacity="0.4" />
+                </svg>
               </div>
+              {!collapsed && (
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight">DArk Modeler</h2>
+                  <p className="text-xs text-muted-foreground">AI-Powered Data Architecture</p>
+                </div>
+              )}
+            </div>
+            {onToggleCollapse && (
+              <Tooltip delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggleCollapse}
+                    className={cn(
+                      "h-8 w-8 rounded-md border border-transparent text-muted-foreground transition hover:text-foreground",
+                      collapsed && "h-9 w-9"
+                    )}
+                    aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+                  >
+                    {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p className="text-sm font-medium">{collapsed ? "Expand" : "Collapse"} navigation</p>
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>
