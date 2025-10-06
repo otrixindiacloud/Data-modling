@@ -66,229 +66,168 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
   });
 
   const createObjectMutation = useMutation({
-    mutationFn: async (objectData: InsertDataObject & { attributes: any[] }) => {
+    mutationFn: async (objectData: InsertDataObject & { attributes: typeof attributes }) => {
       const { attributes: attrData, ...objData } = objectData;
-      
+
       if (!currentModel) {
         throw new Error("No current model selected");
       }
 
-      // Get all models to find the model family
       const allModelsResponse = await fetch("/api/models");
+      if (!allModelsResponse.ok) {
+        throw new Error("Failed to load data models");
+      }
       const allModels = await allModelsResponse.json();
-      
-      // Find the model family (conceptual + logical + physical)
+
       let modelFamily: any[] = [];
-      
+
       if (currentModel.layer === "conceptual") {
-        // If current model is conceptual, find its logical and physical children
-        modelFamily = allModels.filter((model: any) => 
-          model.id === currentModel.id || model.parentModelId === currentModel.id
+        modelFamily = allModels.filter(
+          (model: any) => model.id === currentModel.id || model.parentModelId === currentModel.id,
         );
       } else if (currentModel.layer === "logical" || currentModel.layer === "physical") {
-        // If current model is logical/physical, find the conceptual parent and all siblings
-        const conceptualParent = allModels.find((model: any) => 
-          model.id === currentModel.parentModelId && model.layer === "conceptual"
+        const conceptualParent = allModels.find(
+          (model: any) => model.id === currentModel.parentModelId && model.layer === "conceptual",
         );
-        
+
         if (conceptualParent) {
-          modelFamily = allModels.filter((model: any) => 
-            model.id === conceptualParent.id || model.parentModelId === conceptualParent.id
+          modelFamily = allModels.filter(
+            (model: any) => model.id === conceptualParent.id || model.parentModelId === conceptualParent.id,
           );
         } else {
-          // Fallback: if no conceptual parent found, use current model
           modelFamily = [currentModel];
         }
       } else {
-        // Fallback: use current model only
         modelFamily = [currentModel];
       }
-      
-      const conceptualModel = modelFamily.find((m: any) => m.layer === "conceptual");
-      const logicalModel = modelFamily.find((m: any) => m.layer === "logical");
-      const physicalModel = modelFamily.find((m: any) => m.layer === "physical");
-      
+
+      const conceptualModel = modelFamily.find((model: any) => model.layer === "conceptual");
+      const logicalModel = modelFamily.find((model: any) => model.layer === "logical");
+      const physicalModel = modelFamily.find((model: any) => model.layer === "physical");
+
       if (!conceptualModel || !logicalModel || !physicalModel) {
         console.error("Model family detection failed:", {
           currentModel,
           modelFamily,
           conceptualModel,
           logicalModel,
-          physicalModel
+          physicalModel,
         });
-        throw new Error(`Model family incomplete - missing conceptual, logical, or physical layer. Found: conceptual=${!!conceptualModel}, logical=${!!logicalModel}, physical=${!!physicalModel}`);
+        throw new Error(
+          `Model family incomplete - missing conceptual, logical, or physical layer. Found: conceptual=${!!conceptualModel}, logical=${!!logicalModel}, physical=${!!physicalModel}`,
+        );
       }
 
-      // Create objects in all three layers
       const position = {
         x: Math.random() * 300 + 50,
-        y: Math.random() * 300 + 50
+        y: Math.random() * 300 + 50,
       };
 
-      const createdObjects = [];
+      const filteredAttributes = attrData.filter((attr) => attr.name.trim());
 
-      // Create in conceptual layer
-      const conceptualObjectResponse = await fetch("/api/objects", {
+      const payload = {
+        ...objData,
+        modelId: conceptualModel.id,
+        attributes: filteredAttributes.map((attr, index) => ({
+          name: attr.name,
+          conceptualType: attr.conceptualType || null,
+          logicalType: attr.logicalType || null,
+          physicalType: attr.physicalType || null,
+          dataType: attr.logicalType || attr.physicalType || attr.conceptualType || null,
+          nullable: attr.nullable,
+          isPrimaryKey: attr.isPrimaryKey,
+          isForeignKey: attr.isForeignKey,
+          length: attr.length ?? null,
+          orderIndex: index,
+        })),
+        cascade: true,
+        modelObjectConfig: {
+          position,
+          isVisible: true,
+          layerSpecificConfig: {
+            position,
+          },
+        },
+        layerModelObjectConfig: {
+          logical: { position },
+          physical: { position },
+        },
+      };
+
+      const response = await fetch("/api/objects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...objData,
-          modelId: conceptualModel.id
-        })
+        body: JSON.stringify(payload),
       });
-      
-      if (!conceptualObjectResponse.ok) {
-        const errorData = await conceptualObjectResponse.json();
-        throw new Error(`Failed to create conceptual object: ${errorData.message}`);
-      }
-      
-      const conceptualObject = await conceptualObjectResponse.json();
-      createdObjects.push({ layer: "conceptual", object: conceptualObject });
 
-      // Create in logical layer
-      const logicalObjectResponse = await fetch("/api/objects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...objData,
-          modelId: logicalModel.id
-        })
-      });
-      
-      if (!logicalObjectResponse.ok) {
-        const errorData = await logicalObjectResponse.json();
-        throw new Error(`Failed to create logical object: ${errorData.message}`);
-      }
-      
-      const logicalObject = await logicalObjectResponse.json();
-      createdObjects.push({ layer: "logical", object: logicalObject });
-
-      // Create in physical layer
-      const physicalObjectResponse = await fetch("/api/objects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...objData,
-          modelId: physicalModel.id
-        })
-      });
-      
-      if (!physicalObjectResponse.ok) {
-        const errorData = await physicalObjectResponse.json();
-        throw new Error(`Failed to create physical object: ${errorData.message}`);
-      }
-      
-      const physicalObject = await physicalObjectResponse.json();
-      createdObjects.push({ layer: "physical", object: physicalObject });
-
-      // Add objects to their respective models with positions
-      for (const { layer, object } of createdObjects) {
-        const model = modelFamily.find((m: any) => m.layer === layer);
-        if (model) {
-          await fetch(`/api/models/${model.id}/objects`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              objectId: object.id,
-              position: position,
-              targetSystem: targetSystem,
-              isVisible: true,
-              layerSpecificConfig: {
-                position: position
-              }
-            })
-          });
+      if (!response.ok) {
+        let details: any = null;
+        try {
+          details = await response.json();
+        } catch (err) {
+          // ignore JSON parse error
         }
+        throw new Error(`Failed to create object: ${details?.message ?? response.statusText}`);
       }
-      
-      // Create attributes in logical and physical layers only
-      if (attrData.length > 0 && attrData.some(attr => attr.name.trim())) {
-        for (const attr of attrData) {
-          if (attr.name.trim()) {
-            // Create in logical layer
-            const logicalAttrResponse = await fetch("/api/attributes", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...attr,
-                objectId: logicalObject.id,
-                orderIndex: attrData.indexOf(attr)
-              })
-            });
-            
-            if (!logicalAttrResponse.ok) {
-              const errorData = await logicalAttrResponse.json();
-              throw new Error(`Failed to create logical attribute: ${errorData.message}`);
-            }
 
-            // Create in physical layer
-            const physicalAttrResponse = await fetch("/api/attributes", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ...attr,
-                objectId: physicalObject.id,
-                orderIndex: attrData.indexOf(attr)
-              })
-            });
-            
-            if (!physicalAttrResponse.ok) {
-              const errorData = await physicalAttrResponse.json();
-              throw new Error(`Failed to create physical attribute: ${errorData.message}`);
-            }
-          }
-        }
-      }
-      
-      return conceptualObject; // Return conceptual object as primary
+      const cascadeResult = await response.json();
+
+      return { cascadeResult, attributes: filteredAttributes };
     },
-    onSuccess: (newObject) => {
-      // Dispatch events for real-time UI updates
-      window.dispatchEvent(new CustomEvent('objectCreated', {
-        detail: { 
-          objectId: newObject.id, 
-          name: newObject.name,
-          attributes: attributes.filter(attr => attr.name.trim()),
-          timestamp: new Date()
-        }
-      }));
-      
-      // Force Data Explorer refresh after a small delay
+    onSuccess: ({ cascadeResult, attributes: createdAttributes }) => {
+      const conceptualLayer = cascadeResult?.layers?.conceptual;
+      const conceptualObject = conceptualLayer?.object ?? cascadeResult?.primaryObject;
+
+      if (!conceptualObject) {
+        console.warn("Cascade response missing conceptual object", cascadeResult);
+        return;
+      }
+
+      window.dispatchEvent(
+        new CustomEvent("objectCreated", {
+          detail: {
+            objectId: conceptualObject.id,
+            name: conceptualObject.name,
+            attributes: createdAttributes,
+            timestamp: new Date(),
+          },
+        }),
+      );
+
       setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('forceDataRefresh', {
-          detail: { reason: 'object_created', objectId: newObject.id }
-        }));
+        window.dispatchEvent(
+          new CustomEvent("forceDataRefresh", {
+            detail: { reason: "object_created", objectId: conceptualObject.id },
+          }),
+        );
       }, 300);
-      
+
       toast({
         title: "✓ Object Created Successfully",
-        description: `${objectName} has been added to the model with ${attributes.filter(attr => attr.name.trim()).length} attributes.`
+        description: `${conceptualObject.name} has been added to the model with ${createdAttributes.length} attributes.`,
       });
-      
-      // Complete cache invalidation to prevent duplicates and stale data
+
       queryClient.invalidateQueries({ queryKey: ["/api/models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/attributes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/domains"] });
-  queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "canvas"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "objects"] });
-      
-      // Force immediate cache refresh to eliminate stale data
+
       queryClient.refetchQueries({ queryKey: ["/api/objects"] });
       queryClient.refetchQueries({ queryKey: ["/api/attributes"] });
-      
-      // Reset form and close modal
+
       resetForm();
       onOpenChange(false);
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast({
         title: "Error",
-        description: "Failed to create object. Please try again.",
-        variant: "destructive"
+        description: error?.message ?? "Failed to create object. Please try again.",
+        variant: "destructive",
       });
-    }
+    },
   });
 
   const resetForm = () => {

@@ -1728,7 +1728,7 @@ export const BusinessCapabilityMap: React.FC = () => {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="space-y-2">
                           <p className="text-sm text-muted-foreground">
-                            Explore the full capability landscape in an infographic view inspired by LeanIX best practices.
+                            Explore the full capability landscape in an infographic view best practices.
                           </p>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant="outline" className="w-fit">
@@ -1912,7 +1912,11 @@ export const BusinessCapabilityMap: React.FC = () => {
                   >
                     <TabsList className="w-full justify-start">
                       <TabsTrigger value="insights">Insights</TabsTrigger>
-                      <TabsTrigger value="admin">Administration</TabsTrigger>
+                      <TabsTrigger value="capability">Capability</TabsTrigger>
+                      <TabsTrigger value="child_capability">Child Capability</TabsTrigger>
+                      <TabsTrigger value="domain">Domain</TabsTrigger>
+                      <TabsTrigger value="data_area">Data Area</TabsTrigger>
+                      <TabsTrigger value="system">System</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="insights">
@@ -1957,19 +1961,10 @@ export const BusinessCapabilityMap: React.FC = () => {
                             />
                           </div>
                         )}
-
-                        <Separator />
-
-                        <div>
-                          <h4 className="mb-2 text-sm font-semibold">Data &amp; System Impact</h4>
-                          <ScrollArea className="h-[260px] pr-2">
-                            <CapabilityMappingsDisplay mappings={capabilityMappings} />
-                          </ScrollArea>
-                        </div>
                       </div>
                     </TabsContent>
 
-                    <TabsContent value="admin">
+                    <TabsContent value="capability">
                       <div className="space-y-6">
                         <div className="space-y-4 rounded-lg border p-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2101,7 +2096,11 @@ export const BusinessCapabilityMap: React.FC = () => {
                             />
                           </div>
                         </div>
+                      </div>
+                    </TabsContent>
 
+                    <TabsContent value="child_capability">
+                      <div className="space-y-6">
                         <div className="space-y-4 rounded-lg border p-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <h4 className="text-sm font-semibold">Create child capability</h4>
@@ -2244,7 +2243,11 @@ export const BusinessCapabilityMap: React.FC = () => {
                             />
                           </div>
                         </div>
+                      </div>
+                    </TabsContent>
 
+                    <TabsContent value="domain">
+                      <div className="space-y-6">
                         <div className="space-y-6 rounded-lg border p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2325,9 +2328,13 @@ export const BusinessCapabilityMap: React.FC = () => {
                               />
                             </div>
                           </div>
+                      </div>
+                      </div>
+                    </TabsContent>
 
-                          <Separator />
-
+                    <TabsContent value="data_area">
+                      <div className="space-y-6">
+                        <div className="space-y-6 rounded-lg border p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <h4 className="text-sm font-semibold">Link data area</h4>
@@ -2432,120 +2439,93 @@ export const BusinessCapabilityMap: React.FC = () => {
                               />
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </TabsContent>
 
-                          <Separator />
-
+                    <TabsContent value="system">
+                      <div className="space-y-6">
+                        <div className="space-y-6 rounded-lg border p-4">
                           <div className="space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <h4 className="text-sm font-semibold">Link system</h4>
+                              <h4 className="text-sm font-semibold">Link data domain</h4>
                               <Button
                                 size="sm"
-                                onClick={handleAddSystemMapping}
-                                disabled={isCreatingSystemMapping}
+                                onClick={handleAddDomainMapping}
+                                disabled={isCreatingDomainMapping}
                               >
-                                {isCreatingSystemMapping ? (
+                                {isCreatingDomainMapping ? (
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 ) : (
                                   <Plus className="mr-2 h-4 w-4" />
                                 )}
-                                Add system
+                                Add domain
                               </Button>
                             </div>
                             <div className="grid gap-3 md:grid-cols-2">
                               <div className="space-y-1">
-                                <Label htmlFor="system-select">System</Label>
+                                <Label htmlFor="domain-select">Domain</Label>
                                 <Select
-                                  value={systemMappingForm.systemId}
-                                  onValueChange={(value) => handleSystemMappingInputChange("systemId", value)}
+                                  value={domainMappingForm.domainId}
+                                  onValueChange={(value) => handleDomainMappingInputChange("domainId", value)}
                                 >
-                                  <SelectTrigger id="system-select">
-                                    <SelectValue placeholder="Select system" />
+                                  <SelectTrigger id="domain-select">
+                                    <SelectValue placeholder="Select domain" />
                                   </SelectTrigger>
                                   <SelectContent className="max-h-64">
-                                    {sortedSystems.map((system) => (
-                                      <SelectItem key={system.id} value={String(system.id)}>
-                                        {system.name}
+                                    {sortedDomains.map((domain) => (
+                                      <SelectItem key={domain.id} value={String(domain.id)}>
+                                        {domain.name}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
                               </div>
                               <div className="space-y-1">
-                                <Label htmlFor="system-mapping-type">Relationship</Label>
+                                <Label htmlFor="domain-mapping-type">Relationship</Label>
                                 <Select
-                                  value={systemMappingForm.mappingType}
-                                  onValueChange={(value) => handleSystemMappingInputChange("mappingType", value)}
+                                  value={domainMappingForm.mappingType}
+                                  onValueChange={(value) => handleDomainMappingInputChange("mappingType", value)}
                                 >
-                                  <SelectTrigger id="system-mapping-type">
+                                  <SelectTrigger id="domain-mapping-type">
                                     <SelectValue placeholder="Select relationship" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="enables">Enables</SelectItem>
-                                    <SelectItem value="supports">Supports</SelectItem>
-                                    <SelectItem value="automates">Automates</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label htmlFor="system-role">System role</Label>
-                                <Select
-                                  value={systemMappingForm.systemRole}
-                                  onValueChange={(value) => handleSystemMappingInputChange("systemRole", value)}
-                                >
-                                  <SelectTrigger id="system-role">
-                                    <SelectValue placeholder="Select role" />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="primary">Primary</SelectItem>
                                     <SelectItem value="secondary">Secondary</SelectItem>
                                     <SelectItem value="supporting">Supporting</SelectItem>
-                                    <SelectItem value="legacy">Legacy</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
                               <div className="space-y-1">
-                                <Label htmlFor="system-coverage">Coverage</Label>
+                                <Label htmlFor="domain-importance">Importance</Label>
                                 <Select
-                                  value={systemMappingForm.coverage}
-                                  onValueChange={(value) => handleSystemMappingInputChange("coverage", value)}
+                                  value={domainMappingForm.importance}
+                                  onValueChange={(value) => handleDomainMappingInputChange("importance", value)}
                                 >
-                                  <SelectTrigger id="system-coverage">
-                                    <SelectValue placeholder="Select coverage" />
+                                  <SelectTrigger id="domain-importance">
+                                    <SelectValue placeholder="Select importance" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="full">Full</SelectItem>
-                                    <SelectItem value="partial">Partial</SelectItem>
-                                    <SelectItem value="minimal">Minimal</SelectItem>
+                                    <SelectItem value="low">Low</SelectItem>
+                                    <SelectItem value="medium">Medium</SelectItem>
+                                    <SelectItem value="high">High</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
                             </div>
                             <div className="space-y-1">
-                              <Label htmlFor="system-description">Context</Label>
+                              <Label htmlFor="domain-description">Context</Label>
                               <Textarea
-                                id="system-description"
+                                id="domain-description"
                                 rows={3}
-                                value={systemMappingForm.description}
-                                onChange={(event) => handleSystemMappingInputChange("description", event.target.value)}
-                                placeholder="Describe the system's role for this capability"
+                                value={domainMappingForm.description}
+                                onChange={(event) => handleDomainMappingInputChange("description", event.target.value)}
+                                placeholder="What role does this domain play?"
                               />
                             </div>
                           </div>
-
-                          <Separator />
-
-                          <div className="space-y-3">
-                            <h4 className="text-sm font-semibold">Current relationships</h4>
-                            <ScrollArea className="h-[260px] pr-2">
-                              <CapabilityMappingsDisplay
-                                mappings={capabilityMappings}
-                                onRemoveDomainMapping={handleRemoveDomainMapping}
-                                onRemoveDataAreaMapping={handleRemoveDataAreaMapping}
-                                onRemoveSystemMapping={handleRemoveSystemMapping}
-                              />
-                            </ScrollArea>
-                          </div>
-                        </div>
+                      </div>
                       </div>
                     </TabsContent>
                   </Tabs>
@@ -2554,9 +2534,20 @@ export const BusinessCapabilityMap: React.FC = () => {
                     Select a capability from the hierarchy or visualization to explore supporting data domains, areas, and enabling systems.
                   </p>
                 )}
+                      <div className="gap-4 mt-4">
+                      <div className="space-y-6">
+                        <div className="space-y-6 rounded-lg border p-4">
+                          <h4 className="mb-2 text-sm font-semibold">Data &amp; System Impact</h4>
+                          <ScrollArea className="h-[340px] pr-2">
+                            <CapabilityMappingsDisplay mappings={capabilityMappings} />
+                          </ScrollArea>
+                        </div>
+                        </div>
+                        </div>
               </CardContent>
             </Card>
           </div>
+
     <div className="flex flex-col gap-4 w-full">
             <Card className="h-[520px]">
               <CardHeader className="pb-0">

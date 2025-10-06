@@ -26,6 +26,9 @@ import {
   type InsertDataModel,
   type InsertDataModelObject,
   type InsertDataObject,
+  type InsertDataModelAttribute,
+  type InsertDataModelObjectRelationship,
+  type InsertDataObjectRelationship,
   type InsertSystem,
   type System
 } from "../shared/schema";
@@ -95,6 +98,28 @@ function resetMockStore() {
   counters.dataModelAttribute = 0;
   counters.dataModelObjectRelationship = 0;
   counters.dataModelProperty = 0;
+}
+
+function matchesConceptualOrigin(modelObject: DataModelObject | undefined, conceptualId: number): boolean {
+  if (!modelObject) {
+    return false;
+  }
+
+  if (modelObject.objectId === conceptualId) {
+    return true;
+  }
+
+  const metadata = (modelObject.metadata ?? {}) as Record<string, any> | null;
+  const layerSpecificConfig = (modelObject.layerSpecificConfig ?? {}) as Record<string, any> | null;
+
+  const metaOrigin = metadata && typeof metadata === "object"
+    ? (metadata.originConceptualObjectId as number | undefined)
+    : undefined;
+  const layerOrigin = layerSpecificConfig && typeof layerSpecificConfig === "object"
+    ? (layerSpecificConfig.originConceptualObjectId as number | undefined)
+    : undefined;
+
+  return metaOrigin === conceptualId || layerOrigin === conceptualId;
 }
 
 async function seedObjectLakeData() {
@@ -361,6 +386,110 @@ async function seedObjectLakeData() {
   };
 }
 
+interface RelationshipSyncTestContext {
+  conceptualModel: DataModel;
+  logicalModel: DataModel;
+  physicalModel: DataModel;
+  source: {
+    object: DataObject;
+    conceptual: DataModelObject;
+    logical: DataModelObject;
+    physical: DataModelObject;
+  };
+  target: {
+    object: DataObject;
+    conceptual: DataModelObject;
+    logical: DataModelObject;
+    physical: DataModelObject;
+  };
+}
+
+async function setupRelationshipSyncTestContext(): Promise<RelationshipSyncTestContext> {
+  const targetSystemId = store.systems[0]?.id ?? 1;
+
+  const conceptualModel = await storageMock.createDataModel({
+    name: "Sync Conceptual",
+    layer: "conceptual",
+    targetSystemId
+  } satisfies InsertDataModel);
+
+  const logicalModel = await storageMock.createDataModel({
+    name: "Sync Logical",
+    layer: "logical",
+    parentModelId: conceptualModel.id,
+    targetSystemId
+  } satisfies InsertDataModel);
+
+  const physicalModel = await storageMock.createDataModel({
+    name: "Sync Physical",
+    layer: "physical",
+    parentModelId: conceptualModel.id,
+    targetSystemId
+  } satisfies InsertDataModel);
+
+  const sourceObject = await storageMock.createDataObject({
+    name: "Order",
+    modelId: conceptualModel.id,
+    position: { x: 120, y: 80 } as any,
+    commonProperties: { steward: "Sales" } as any,
+    metadata: { owner: "OrderOps" } as any
+  } satisfies InsertDataObject);
+
+  const targetObject = await storageMock.createDataObject({
+    name: "Customer",
+    modelId: conceptualModel.id,
+    position: { x: 260, y: 140 } as any,
+    commonProperties: { steward: "CRM" } as any,
+    metadata: { owner: "CustomerSuccess" } as any
+  } satisfies InsertDataObject);
+
+  const createModelInstance = async (
+    model: DataModel,
+    object: DataObject
+  ): Promise<DataModelObject> => storageMock.createDataModelObject({
+    objectId: object.id,
+    modelId: model.id,
+    targetSystemId,
+    position: { x: object.position?.x ?? 0, y: object.position?.y ?? 0 } as any,
+    metadata: {
+      originConceptualObjectId: object.id,
+      originConceptualModelId: conceptualModel.id,
+      layer: model.layer
+    } as any,
+    layerSpecificConfig: {
+      originConceptualObjectId: object.id,
+      originConceptualModelId: conceptualModel.id,
+      layer: model.layer
+    } as any
+  } satisfies InsertDataModelObject);
+
+  const sourceConceptual = await createModelInstance(conceptualModel, sourceObject);
+  const sourceLogical = await createModelInstance(logicalModel, sourceObject);
+  const sourcePhysical = await createModelInstance(physicalModel, sourceObject);
+
+  const targetConceptual = await createModelInstance(conceptualModel, targetObject);
+  const targetLogical = await createModelInstance(logicalModel, targetObject);
+  const targetPhysical = await createModelInstance(physicalModel, targetObject);
+
+  return {
+    conceptualModel,
+    logicalModel,
+    physicalModel,
+    source: {
+      object: sourceObject,
+      conceptual: sourceConceptual,
+      logical: sourceLogical,
+      physical: sourcePhysical
+    },
+    target: {
+      object: targetObject,
+      conceptual: targetConceptual,
+      logical: targetLogical,
+      physical: targetPhysical
+    }
+  } satisfies RelationshipSyncTestContext;
+}
+
 const storageMock = {
   async getSystems(): Promise<System[]> {
     return store.systems;
@@ -521,6 +650,38 @@ const storageMock = {
     store.dataModelObjects.push(newModelObject);
     return newModelObject;
   },
+  async getDataModelObject(id: number): Promise<DataModelObject | undefined> {
+    return store.dataModelObjects.find((modelObject) => modelObject.id === id);
+  },
+  async updateDataModelObject(id: number, updates: Partial<InsertDataModelObject>): Promise<DataModelObject> {
+    const modelObject = store.dataModelObjects.find((entry) => entry.id === id);
+    if (!modelObject) {
+      throw new Error(`DataModelObject with id ${id} not found`);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "targetSystemId")) {
+      modelObject.targetSystemId = updates.targetSystemId ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "position")) {
+      modelObject.position = (updates.position ?? null) as any;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "metadata")) {
+      modelObject.metadata = (updates.metadata ?? null) as any;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "isVisible")) {
+      modelObject.isVisible = updates.isVisible ?? modelObject.isVisible;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "layerSpecificConfig")) {
+      modelObject.layerSpecificConfig = (updates.layerSpecificConfig ?? null) as any;
+    }
+
+    modelObject.updatedAt = new Date();
+    return modelObject;
+  },
   async getDataModelObjects(): Promise<DataModelObject[]> {
     return store.dataModelObjects;
   },
@@ -532,6 +693,9 @@ const storageMock = {
   },
   async getDataModelObjectRelationships(): Promise<DataModelObjectRelationship[]> {
     return store.dataModelObjectRelationships;
+  },
+  async getDataModelObjectRelationship(id: number): Promise<DataModelObjectRelationship | undefined> {
+    return store.dataModelObjectRelationships.find((relationship) => relationship.id === id);
   },
   async getDataModelObjectRelationshipsByModel(modelId: number): Promise<DataModelObjectRelationship[]> {
     return store.dataModelObjectRelationships.filter((relationship) => relationship.modelId === modelId);
@@ -573,11 +737,163 @@ const storageMock = {
   async getDataModelAttributes(): Promise<DataModelAttribute[]> {
     return store.dataModelAttributes;
   },
+  async createDataModelAttribute(attribute: InsertDataModelAttribute): Promise<DataModelAttribute> {
+    const newAttribute: DataModelAttribute = {
+      id: ++counters.dataModelAttribute,
+      attributeId: attribute.attributeId,
+      modelObjectId: attribute.modelObjectId,
+      modelId: attribute.modelId,
+      conceptualType: attribute.conceptualType ?? null,
+      logicalType: attribute.logicalType ?? null,
+      physicalType: attribute.physicalType ?? null,
+      nullable: attribute.nullable ?? true,
+      isPrimaryKey: attribute.isPrimaryKey ?? false,
+      isForeignKey: attribute.isForeignKey ?? false,
+      orderIndex: attribute.orderIndex ?? 0,
+      layerSpecificConfig: (attribute.layerSpecificConfig ?? null) as any,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    store.dataModelAttributes.push(newAttribute);
+    return newAttribute;
+  },
   async getDataModelAttribute(id: number): Promise<DataModelAttribute | undefined> {
     return store.dataModelAttributes.find((attribute) => attribute.id === id);
   },
+  async createDataModelObjectRelationship(
+    relationship: InsertDataModelObjectRelationship
+  ): Promise<DataModelObjectRelationship> {
+    const newRelationship: DataModelObjectRelationship = {
+      id: ++counters.dataModelObjectRelationship,
+      sourceModelObjectId: relationship.sourceModelObjectId,
+      targetModelObjectId: relationship.targetModelObjectId,
+      type: relationship.type,
+      relationshipLevel: relationship.relationshipLevel ?? "object",
+      sourceAttributeId: relationship.sourceAttributeId ?? null,
+      targetAttributeId: relationship.targetAttributeId ?? null,
+      modelId: relationship.modelId,
+      layer: relationship.layer,
+      name: relationship.name ?? null,
+      description: relationship.description ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    store.dataModelObjectRelationships.push(newRelationship);
+    return newRelationship;
+  },
+  async updateDataModelObjectRelationship(
+    id: number,
+    updates: Partial<InsertDataModelObjectRelationship>,
+  ): Promise<DataModelObjectRelationship> {
+    const relationship = store.dataModelObjectRelationships.find((entry) => entry.id === id);
+    if (!relationship) {
+      throw new Error(`Relationship ${id} not found`);
+    }
+
+    if (updates.type !== undefined) {
+      relationship.type = updates.type;
+    }
+
+    if (updates.relationshipLevel !== undefined) {
+      relationship.relationshipLevel = updates.relationshipLevel;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "sourceAttributeId")) {
+      relationship.sourceAttributeId = updates.sourceAttributeId ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "targetAttributeId")) {
+      relationship.targetAttributeId = updates.targetAttributeId ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "name")) {
+      relationship.name = updates.name ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "description")) {
+      relationship.description = updates.description ?? null;
+    }
+
+    return relationship;
+  },
+  async deleteDataModelObjectRelationship(id: number): Promise<void> {
+    store.dataModelObjectRelationships = store.dataModelObjectRelationships.filter(
+      (relationship) => relationship.id !== id,
+    );
+  },
   async getDataObjectRelationships(): Promise<DataObjectRelationship[]> {
     return store.dataObjectRelationships;
+  },
+  async getDataObjectRelationshipsByObject(objectId: number): Promise<DataObjectRelationship[]> {
+    return store.dataObjectRelationships.filter(
+      (relationship) =>
+        relationship.sourceDataObjectId === objectId || relationship.targetDataObjectId === objectId
+    );
+  },
+  async createDataObjectRelationship(
+    relationship: InsertDataObjectRelationship
+  ): Promise<DataObjectRelationship> {
+    const newRelationship: DataObjectRelationship = {
+      id: ++counters.dataObjectRelationship,
+      sourceDataObjectId: relationship.sourceDataObjectId,
+      targetDataObjectId: relationship.targetDataObjectId,
+      type: relationship.type ?? "1:N",
+      relationshipLevel: relationship.relationshipLevel ?? "object",
+      sourceAttributeId: relationship.sourceAttributeId ?? null,
+      targetAttributeId: relationship.targetAttributeId ?? null,
+      name: relationship.name ?? null,
+      description: relationship.description ?? null,
+      metadata: (relationship.metadata ?? null) as any,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    store.dataObjectRelationships.push(newRelationship);
+    return newRelationship;
+  },
+  async updateDataObjectRelationship(
+    id: number,
+    updates: Partial<InsertDataObjectRelationship>
+  ): Promise<DataObjectRelationship> {
+    const relationship = store.dataObjectRelationships.find((entry) => entry.id === id);
+    if (!relationship) {
+      throw new Error(`DataObjectRelationship ${id} not found`);
+    }
+
+    if (updates.type !== undefined) {
+      relationship.type = updates.type;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "relationshipLevel")) {
+      relationship.relationshipLevel = (updates.relationshipLevel ?? "object") as DataObjectRelationship["relationshipLevel"];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "sourceAttributeId")) {
+      relationship.sourceAttributeId = updates.sourceAttributeId ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "targetAttributeId")) {
+      relationship.targetAttributeId = updates.targetAttributeId ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "name")) {
+      relationship.name = updates.name ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "description")) {
+      relationship.description = updates.description ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "metadata")) {
+      relationship.metadata = (updates.metadata ?? null) as any;
+    }
+
+    relationship.updatedAt = new Date();
+    return relationship;
+  },
+  async deleteDataObjectRelationship(id: number): Promise<void> {
+    store.dataObjectRelationships = store.dataObjectRelationships.filter(
+      (relationship) => relationship.id !== id
+    );
   },
   async getDataObjectRelationship(id: number): Promise<DataObjectRelationship | undefined> {
     return store.dataObjectRelationships.find((relationship) => relationship.id === id);
@@ -754,6 +1070,592 @@ describe("Data model creation APIs", () => {
         (modelObject.layerSpecificConfig as Record<string, any>).position !== undefined
       )
     ).toBe(true);
+  });
+
+  it("cascades object creation across layers with attributes", async () => {
+    const conceptualModel = await storageMock.createDataModel({
+      name: "Cascade Conceptual",
+      layer: "conceptual"
+    } satisfies InsertDataModel);
+
+    const logicalModel = await storageMock.createDataModel({
+      name: "Cascade Logical",
+      layer: "logical",
+      parentModelId: conceptualModel.id
+    } satisfies InsertDataModel);
+
+    const physicalModel = await storageMock.createDataModel({
+      name: "Cascade Physical",
+      layer: "physical",
+      parentModelId: conceptualModel.id
+    } satisfies InsertDataModel);
+
+    const cascadePayload = {
+        name: "Customer",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true,
+        attributes: [
+          {
+            name: "customer_id",
+            conceptualType: "Identifier",
+            logicalType: "UUID",
+            physicalType: "uuid",
+            nullable: false,
+            isPrimaryKey: true
+          },
+          {
+            name: "email",
+            conceptualType: "Text",
+            logicalType: "VARCHAR",
+            physicalType: "varchar(255)",
+            nullable: false
+          }
+        ]
+      } as any;
+
+    const response = await request(app)
+      .post("/api/objects")
+      .send(cascadePayload)
+      .expect(201);
+
+    const body = response.body as {
+      layers: Record<string, { object: DataObject; modelObject: DataModelObject }>;
+    };
+
+    expect(body.layers.conceptual?.object?.name).toBe("Customer");
+    expect(body.layers.logical?.object?.modelId).toBe(logicalModel.id);
+    expect(body.layers.physical?.object?.modelId).toBe(physicalModel.id);
+
+    const logicalObjects = store.dataObjects.filter(
+      (object) => object.modelId === logicalModel.id && object.name === "Customer"
+    );
+    const physicalObjects = store.dataObjects.filter(
+      (object) => object.modelId === physicalModel.id && object.name === "Customer"
+    );
+
+    expect(logicalObjects).toHaveLength(1);
+    expect(physicalObjects).toHaveLength(1);
+
+    const conceptualAttributes = store.attributes.filter(
+      (attribute) => attribute.objectId === body.layers.conceptual!.object.id
+    );
+    const logicalAttributes = store.attributes.filter((attribute) => attribute.objectId === logicalObjects[0]!.id);
+    const physicalAttributes = store.attributes.filter((attribute) => attribute.objectId === physicalObjects[0]!.id);
+
+    expect(conceptualAttributes).toHaveLength(2);
+    expect(logicalAttributes).toHaveLength(2);
+    expect(physicalAttributes).toHaveLength(2);
+
+    const conceptualModelAttributes = store.dataModelAttributes.filter(
+      (attribute) => attribute.modelId === conceptualModel.id
+    );
+    const logicalModelAttributes = store.dataModelAttributes.filter((attribute) => attribute.modelId === logicalModel.id);
+    const physicalModelAttributes = store.dataModelAttributes.filter((attribute) => attribute.modelId === physicalModel.id);
+
+    expect(conceptualModelAttributes).toHaveLength(2);
+    expect(logicalModelAttributes).toHaveLength(2);
+    expect(physicalModelAttributes).toHaveLength(2);
+
+    const logicalModelObjects = store.dataModelObjects.filter(
+      (modelObject) => modelObject.modelId === logicalModel.id && modelObject.objectId === logicalObjects[0]!.id
+    );
+    const physicalModelObjects = store.dataModelObjects.filter(
+      (modelObject) => modelObject.modelId === physicalModel.id && modelObject.objectId === physicalObjects[0]!.id
+    );
+
+    expect(logicalModelObjects).toHaveLength(1);
+    expect(physicalModelObjects).toHaveLength(1);
+  });
+
+  it("cascades object creation when physical model is nested under logical", async () => {
+    const conceptualModel = await storageMock.createDataModel({
+      name: "Nested Cascade Conceptual",
+      layer: "conceptual",
+    } satisfies InsertDataModel);
+
+    const logicalModel = await storageMock.createDataModel({
+      name: "Nested Cascade Logical",
+      layer: "logical",
+      parentModelId: conceptualModel.id,
+    } satisfies InsertDataModel);
+
+    const physicalModel = await storageMock.createDataModel({
+      name: "Nested Cascade Physical",
+      layer: "physical",
+      parentModelId: logicalModel.id,
+    } satisfies InsertDataModel);
+
+    const response = await request(app)
+      .post("/api/objects")
+      .send({
+        name: "Invoice",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true,
+        attributes: [
+          {
+            name: "invoice_id",
+            conceptualType: "Identifier",
+            logicalType: "UUID",
+            physicalType: "uuid",
+            nullable: false,
+            isPrimaryKey: true,
+          },
+          {
+            name: "total",
+            conceptualType: "Number",
+            logicalType: "DECIMAL",
+            physicalType: "decimal(10,2)",
+            nullable: false,
+          },
+        ],
+      })
+      .expect(201);
+
+    const body = response.body as {
+      layers: Record<string, { object: DataObject; modelObject: DataModelObject }>;
+    };
+
+    expect(body.layers.conceptual?.object?.name).toBe("Invoice");
+    expect(body.layers.logical?.object?.modelId).toBe(logicalModel.id);
+    expect(body.layers.physical?.object?.modelId).toBe(physicalModel.id);
+
+    const logicalObjects = store.dataObjects.filter(
+      (object) => object.modelId === logicalModel.id && object.name === "Invoice",
+    );
+    const physicalObjects = store.dataObjects.filter(
+      (object) => object.modelId === physicalModel.id && object.name === "Invoice",
+    );
+
+    expect(logicalObjects).toHaveLength(1);
+    expect(physicalObjects).toHaveLength(1);
+
+    const conceptualAttributes = store.attributes.filter(
+      (attribute) => attribute.objectId === body.layers.conceptual!.object.id,
+    );
+    const logicalAttributes = store.attributes.filter((attribute) => attribute.objectId === logicalObjects[0]!.id);
+    const physicalAttributes = store.attributes.filter((attribute) => attribute.objectId === physicalObjects[0]!.id);
+
+    expect(conceptualAttributes).toHaveLength(2);
+    expect(logicalAttributes).toHaveLength(2);
+    expect(physicalAttributes).toHaveLength(2);
+
+    const logicalModelAttributes = store.dataModelAttributes.filter((attribute) => attribute.modelId === logicalModel.id);
+    const physicalModelAttributes = store.dataModelAttributes.filter((attribute) => attribute.modelId === physicalModel.id);
+
+    expect(logicalModelAttributes).toHaveLength(2);
+    expect(physicalModelAttributes).toHaveLength(2);
+  });
+
+  it("propagates relationships across layers when provided", async () => {
+    const conceptualModel = await storageMock.createDataModel({
+      name: "Relationship Conceptual",
+      layer: "conceptual"
+    } satisfies InsertDataModel);
+
+    const logicalModel = await storageMock.createDataModel({
+      name: "Relationship Logical",
+      layer: "logical",
+      parentModelId: conceptualModel.id
+    } satisfies InsertDataModel);
+
+    const physicalModel = await storageMock.createDataModel({
+      name: "Relationship Physical",
+      layer: "physical",
+      parentModelId: conceptualModel.id
+    } satisfies InsertDataModel);
+
+    const productPayload = {
+        name: "Product",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true
+      } as any;
+
+    const productResponse = await request(app)
+      .post("/api/objects")
+      .send(productPayload)
+      .expect(201);
+
+    const productConceptualId = productResponse.body.layers.conceptual.object.id as number;
+
+    const orderPayload = {
+        name: "Order",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true,
+        relationships: [
+          {
+            targetObjectId: productConceptualId,
+            type: "1:N"
+          }
+        ]
+      } as any;
+
+    const orderResponse = await request(app)
+      .post("/api/objects")
+      .send(orderPayload)
+      .expect(201);
+
+    const orderBody = orderResponse.body as {
+      layers: Record<string, { object: DataObject; modelObject: DataModelObject }>;
+    };
+
+    const orderConceptualObject = orderBody.layers.conceptual!.object;
+
+    const globalRelationships = store.dataObjectRelationships.filter(
+      (relationship) =>
+        (relationship.sourceDataObjectId === orderConceptualObject.id && relationship.targetDataObjectId === productConceptualId) ||
+        (relationship.sourceDataObjectId === productConceptualId && relationship.targetDataObjectId === orderConceptualObject.id)
+    );
+
+    expect(globalRelationships).toHaveLength(1);
+
+    const relationshipByModel = (modelId: number) => {
+      const orderModelObject = store.dataModelObjects.find(
+        (modelObject) =>
+          modelObject.modelId === modelId && matchesConceptualOrigin(modelObject, orderConceptualObject.id)
+      );
+      const productModelObject = store.dataModelObjects.find(
+        (modelObject) =>
+          modelObject.modelId === modelId && matchesConceptualOrigin(modelObject, productConceptualId)
+      );
+
+      if (!orderModelObject || !productModelObject) {
+        return undefined;
+      }
+
+      return store.dataModelObjectRelationships.find(
+        (relationship) =>
+          relationship.modelId === modelId &&
+          relationship.sourceModelObjectId === orderModelObject.id &&
+          relationship.targetModelObjectId === productModelObject.id
+      );
+    };
+
+    expect(relationshipByModel(conceptualModel.id)).toBeDefined();
+    expect(relationshipByModel(logicalModel.id)).toBeDefined();
+    expect(relationshipByModel(physicalModel.id)).toBeDefined();
+  });
+
+  it("propagates relationships when physical model is nested under logical", async () => {
+    const conceptualModel = await storageMock.createDataModel({
+      name: "Nested Relationship Conceptual",
+      layer: "conceptual",
+    } satisfies InsertDataModel);
+
+    const logicalModel = await storageMock.createDataModel({
+      name: "Nested Relationship Logical",
+      layer: "logical",
+      parentModelId: conceptualModel.id,
+    } satisfies InsertDataModel);
+
+    const physicalModel = await storageMock.createDataModel({
+      name: "Nested Relationship Physical",
+      layer: "physical",
+      parentModelId: logicalModel.id,
+    } satisfies InsertDataModel);
+
+    const productPayload = {
+        name: "Product",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true,
+      } as any;
+
+    const productResponse = await request(app)
+      .post("/api/objects")
+      .send(productPayload)
+      .expect(201);
+
+    const productConceptualId = productResponse.body.layers.conceptual.object.id as number;
+
+    const orderPayload = {
+        name: "Order",
+        modelId: conceptualModel.id,
+        objectType: "entity",
+        cascade: true,
+        relationships: [
+          {
+            targetObjectId: productConceptualId,
+            type: "1:N",
+          },
+        ],
+      } as any;
+
+    const orderResponse = await request(app)
+      .post("/api/objects")
+      .send(orderPayload)
+      .expect(201);
+
+    const orderBody = orderResponse.body as {
+      layers: Record<string, { object: DataObject; modelObject: DataModelObject }>;
+    };
+
+    const orderConceptualObject = orderBody.layers.conceptual!.object;
+
+    const globalRelationships = store.dataObjectRelationships.filter(
+      (relationship) =>
+        (relationship.sourceDataObjectId === orderConceptualObject.id &&
+          relationship.targetDataObjectId === productConceptualId) ||
+        (relationship.sourceDataObjectId === productConceptualId &&
+          relationship.targetDataObjectId === orderConceptualObject.id),
+    );
+
+    expect(globalRelationships).toHaveLength(1);
+
+    const relationshipByModel = (modelId: number) => {
+      const orderModelObject = store.dataModelObjects.find(
+        (modelObject) =>
+          modelObject.modelId === modelId &&
+          matchesConceptualOrigin(modelObject, orderConceptualObject.id),
+      );
+      const productModelObject = store.dataModelObjects.find(
+        (modelObject) =>
+          modelObject.modelId === modelId &&
+          matchesConceptualOrigin(modelObject, productConceptualId),
+      );
+
+      if (!orderModelObject || !productModelObject) {
+        return undefined;
+      }
+
+      return store.dataModelObjectRelationships.find(
+        (relationship) =>
+          relationship.modelId === modelId &&
+          relationship.sourceModelObjectId === orderModelObject.id &&
+          relationship.targetModelObjectId === productModelObject.id,
+      );
+    };
+
+    expect(relationshipByModel(conceptualModel.id)).toBeDefined();
+    expect(relationshipByModel(logicalModel.id)).toBeDefined();
+    expect(relationshipByModel(physicalModel.id)).toBeDefined();
+  });
+
+  describe("relationship synchronization endpoints", () => {
+    async function createSynchronizedRelationship() {
+      const context = await setupRelationshipSyncTestContext();
+
+      const response = await request(app)
+        .post("/api/relationships")
+        .send({
+          modelId: context.conceptualModel.id,
+          sourceObjectId: context.source.object.id,
+          targetObjectId: context.target.object.id,
+          type: "1:N",
+        })
+        .expect(201);
+
+      const findRelationship = (modelId: number, sourceId: number, targetId: number) =>
+        store.dataModelObjectRelationships.find(
+          (relationship) =>
+            relationship.modelId === modelId &&
+            relationship.sourceModelObjectId === sourceId &&
+            relationship.targetModelObjectId === targetId,
+        );
+
+      const conceptualRelationship = findRelationship(
+        context.conceptualModel.id,
+        context.source.conceptual.id,
+        context.target.conceptual.id,
+      );
+      const logicalRelationship = findRelationship(
+        context.logicalModel.id,
+        context.source.logical.id,
+        context.target.logical.id,
+      );
+      const physicalRelationship = findRelationship(
+        context.physicalModel.id,
+        context.source.physical.id,
+        context.target.physical.id,
+      );
+
+      const globalRelationship = store.dataObjectRelationships.find(
+        (relationship) =>
+          relationship.sourceDataObjectId === context.source.object.id &&
+          relationship.targetDataObjectId === context.target.object.id,
+      );
+
+      expect(conceptualRelationship).toBeDefined();
+      expect(logicalRelationship).toBeDefined();
+      expect(physicalRelationship).toBeDefined();
+      expect(globalRelationship).toBeDefined();
+
+      return {
+        context,
+        responseBody: response.body as {
+          id: number;
+          dataObjectRelationshipId: number | null;
+          syncedModelIds: number[];
+          type: string;
+        },
+        conceptualRelationship: conceptualRelationship!,
+        logicalRelationship: logicalRelationship!,
+        physicalRelationship: physicalRelationship!,
+        globalRelationship: globalRelationship!,
+      };
+    }
+
+    it("creates synchronized relationships across all layers", async () => {
+      const { context, responseBody, conceptualRelationship, logicalRelationship, physicalRelationship, globalRelationship } =
+        await createSynchronizedRelationship();
+
+      expect(responseBody.type).toBe("1:N");
+      expect(responseBody.syncedModelIds).toEqual(
+        expect.arrayContaining([
+          context.conceptualModel.id,
+          context.logicalModel.id,
+          context.physicalModel.id,
+        ]),
+      );
+      expect(responseBody.dataObjectRelationshipId).not.toBeNull();
+
+      expect(conceptualRelationship.type).toBe("1:N");
+      expect(logicalRelationship.type).toBe("1:N");
+      expect(physicalRelationship.type).toBe("1:N");
+
+      expect(globalRelationship.type).toBe("1:N");
+      expect(globalRelationship.relationshipLevel).toBe("object");
+    });
+
+    it("updates synchronized relationships when modified", async () => {
+      const { context, conceptualRelationship } = await createSynchronizedRelationship();
+
+      const updateResponse = await request(app)
+        .put(`/api/relationships/${conceptualRelationship.id}`)
+        .send({
+          type: "M:N",
+          description: "Updated alignment",
+        })
+        .expect(200);
+
+      const reloadedRelationships = (modelId: number) =>
+        store.dataModelObjectRelationships.filter((relationship) => relationship.modelId === modelId);
+
+      const conceptualMatches = reloadedRelationships(context.conceptualModel.id);
+      const logicalMatches = reloadedRelationships(context.logicalModel.id);
+      const physicalMatches = reloadedRelationships(context.physicalModel.id);
+
+  expect(conceptualMatches).toHaveLength(1);
+  expect(logicalMatches).toHaveLength(1);
+  expect(physicalMatches).toHaveLength(1);
+
+      expect(conceptualMatches.every((relationship) => relationship.type === "M:N")).toBe(true);
+      expect(logicalMatches.every((relationship) => relationship.type === "M:N")).toBe(true);
+      expect(physicalMatches.every((relationship) => relationship.type === "M:N")).toBe(true);
+
+      const globalRelationship = store.dataObjectRelationships.find(
+        (relationship) =>
+          relationship.sourceDataObjectId === context.source.object.id &&
+          relationship.targetDataObjectId === context.target.object.id,
+      );
+
+      expect(globalRelationship?.type).toBe("M:N");
+      expect(globalRelationship?.description).toBe("Updated alignment");
+      expect(updateResponse.body.syncedModelIds).toEqual(
+        expect.arrayContaining([
+          context.conceptualModel.id,
+          context.logicalModel.id,
+          context.physicalModel.id,
+        ]),
+      );
+    });
+
+    it("removes synchronized relationships across the family", async () => {
+      const { context, conceptualRelationship } = await createSynchronizedRelationship();
+
+      await request(app)
+        .delete(`/api/relationships/${conceptualRelationship.id}`)
+        .expect(204);
+
+      const remainingRelationships = store.dataModelObjectRelationships.filter((relationship) =>
+        [
+          context.conceptualModel.id,
+          context.logicalModel.id,
+          context.physicalModel.id,
+        ].includes(relationship.modelId),
+      );
+
+      expect(remainingRelationships).toHaveLength(0);
+      expect(store.dataObjectRelationships).toHaveLength(0);
+    });
+  });
+
+  describe("canvas endpoints", () => {
+    it("returns nodes with common properties and metadata", async () => {
+      const context = await setupRelationshipSyncTestContext();
+
+      const response = await request(app)
+        .get(`/api/models/${context.conceptualModel.id}/canvas?layer=conceptual`)
+        .expect(200);
+
+      const body = response.body as {
+        nodes: Array<{
+          id: string;
+          data: {
+            objectId: number;
+            commonProperties: Record<string, any> | null;
+            metadata: Record<string, any> | null;
+          };
+        }>;
+        edges: unknown[];
+      };
+
+      expect(body.nodes).toHaveLength(2);
+      const orderNode = body.nodes.find((node) => node.id === context.source.object.id.toString());
+      const customerNode = body.nodes.find((node) => node.id === context.target.object.id.toString());
+
+      expect(orderNode?.data.commonProperties).toEqual({ steward: "Sales" });
+      expect(orderNode?.data.metadata).toEqual({ owner: "OrderOps" });
+      expect(customerNode?.data.commonProperties).toEqual({ steward: "CRM" });
+      expect(customerNode?.data.metadata).toEqual({ owner: "CustomerSuccess" });
+
+      expect(body.edges).toBeInstanceOf(Array);
+    });
+
+    it("persists conceptual positions to data objects", async () => {
+      const context = await setupRelationshipSyncTestContext();
+
+      const newPosition = { x: 410, y: 275 };
+
+      const response = await request(app)
+        .post(`/api/models/${context.conceptualModel.id}/canvas/positions`)
+        .send({
+          layer: "conceptual",
+          positions: [
+            {
+              modelObjectId: context.source.conceptual.id,
+              position: newPosition,
+            },
+          ],
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({ success: true, saved: 1 });
+
+      const updatedModelObject = store.dataModelObjects.find(
+        (modelObject) => modelObject.id === context.source.conceptual.id,
+      );
+      expect(updatedModelObject).toBeDefined();
+
+      const layerConfig = (updatedModelObject!.layerSpecificConfig ?? {}) as Record<string, any>;
+      const layers = (layerConfig.layers ?? {}) as Record<string, any>;
+      expect(layers.conceptual?.position).toEqual(newPosition);
+      expect(layerConfig.position).toEqual(newPosition);
+      expect(layerConfig.lastUpdatedLayer).toBe("conceptual");
+
+      const updatedDataObject = store.dataObjects.find(
+        (object) => object.id === context.source.object.id,
+      );
+      expect(updatedDataObject?.position).toEqual(newPosition as any);
+
+      const untouchedDataObject = store.dataObjects.find(
+        (object) => object.id === context.target.object.id,
+      );
+      expect(untouchedDataObject?.position).toEqual(context.target.object.position);
+    });
   });
 
   describe("GET /api/object-lake", () => {

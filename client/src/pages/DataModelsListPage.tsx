@@ -13,6 +13,7 @@ import AddDataModelModal from "@/components/modals/AddDataModelModal";
 import { ModelingAgentPanel } from "@/components/ModelingAgentPanel";
 import { useModelerStore } from "@/store/modelerStore";
 import type { DataModel, DataDomain, DataArea, System } from "@shared/schema";
+import type { ModelLayer } from "@/types/modeler";
 
 interface ModelGroup {
   conceptual: DataModel;
@@ -120,7 +121,32 @@ export default function DataModelsListPage() {
 
   const handleViewDetails = (model: DataModel) => {
     setCurrentModel(model);
+
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem("modeler:pendingLayer", "conceptual");
+        window.sessionStorage.setItem("modeler:pendingModelId", model.id.toString());
+      } catch (error) {
+        console.warn("Failed to persist conceptual layer before navigation", error);
+      }
+    }
+
     setLocation(`/modeler/${model.id}`);
+  };
+
+  const handleLayerNavigation = (layerModel: DataModel, layerKey: ModelLayer, conceptualId: number) => {
+    setCurrentModel(layerModel);
+
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem("modeler:pendingLayer", layerKey);
+        window.sessionStorage.setItem("modeler:pendingModelId", layerModel.id.toString());
+      } catch (error) {
+        console.warn("Failed to persist pending layer before navigation", error);
+      }
+    }
+
+    setLocation(`/modeler/${conceptualId}`);
   };
 
   const handleCreateModel = () => {
@@ -309,8 +335,22 @@ export default function DataModelsListPage() {
                     <div className="rounded-lg border border-border/60 bg-background/70 p-4 space-y-3">
                       <div className="font-medium text-sm text-foreground/80">Associated layers</div>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <LayerBadge label="Logical" model={logicalLayer} />
-                        <LayerBadge label="Physical" model={physicalLayer} />
+                        <LayerBadge
+                          label="Logical"
+                          layerKey="logical"
+                          model={logicalLayer}
+                          onNavigate={(layerModel, layerKey) =>
+                            handleLayerNavigation(layerModel, layerKey, conceptual.id)
+                          }
+                        />
+                        <LayerBadge
+                          label="Physical"
+                          layerKey="physical"
+                          model={physicalLayer}
+                          onNavigate={(layerModel, layerKey) =>
+                            handleLayerNavigation(layerModel, layerKey, conceptual.id)
+                          }
+                        />
                       </div>
                     </div>
 
@@ -342,10 +382,12 @@ export default function DataModelsListPage() {
 
 interface LayerBadgeProps {
   label: string;
+  layerKey: ModelLayer;
   model?: DataModel;
+  onNavigate?: (model: DataModel, layer: ModelLayer) => void;
 }
 
-function LayerBadge({ label, model }: LayerBadgeProps) {
+function LayerBadge({ label, layerKey, model, onNavigate }: LayerBadgeProps) {
   if (!model) {
     return (
       <div className="flex items-center justify-between rounded-md border border-dashed border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -358,14 +400,24 @@ function LayerBadge({ label, model }: LayerBadgeProps) {
   }
 
   return (
-    <div className="flex items-center justify-between rounded-md border border-border/60 bg-background px-3 py-2 text-xs text-muted-foreground">
-      <div className="space-y-1">
-        <div className="font-medium text-foreground/90">{label} layer</div>
-        <div>ID: {model.id}</div>
+    <button
+      type="button"
+      onClick={() => onNavigate?.(model, layerKey)}
+      className="group flex items-center justify-between rounded-md border border-border/60 bg-background px-3 py-2 text-xs text-muted-foreground transition hover:border-primary/50 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+    >
+      <div className="space-y-1 text-left">
+        <div className="flex items-center gap-1 font-medium text-foreground/90">
+          {label} layer
+          <ArrowRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+        </div>
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground/80">
+          {model.name || `Model ${model.id}`}
+        </div>
+        <div className="text-[10px] text-muted-foreground/70">ID: {model.id}</div>
       </div>
       <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-        Ready
+        Open
       </Badge>
-    </div>
+    </button>
   );
 }

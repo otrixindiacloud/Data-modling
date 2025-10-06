@@ -141,13 +141,17 @@ const logicalEntitySchema = z.object({
   attributes: z.array(logicalAttributeSchema).default([]),
 });
 
+const sqlEntrySchema = z
+  .union([z.string(), z.array(z.string())])
+  .transform((value) => (Array.isArray(value) ? value.join("\n") : value));
+
 const aiIssueSchema = z.object({
   severity: z.enum(["info", "warning", "error"]).default("warning"),
   message: z.string(),
   entity: z.string().optional(),
 });
 
-const modelingAgentSchema = z.object({
+export const modelingAgentSchema = z.object({
   summary: z.string(),
   assumptions: z.array(z.string()).default([]),
   conceptualModel: z.object({
@@ -159,7 +163,7 @@ const modelingAgentSchema = z.object({
   physicalModel: z.object({
     entities: z.array(logicalEntitySchema).default([]),
   }),
-  sql: z.record(z.string()).default({}),
+  sql: z.record(sqlEntrySchema).default({}),
   issues: z.array(aiIssueSchema).default([]),
   suggestions: z.array(z.string()).default([]),
 });
@@ -372,7 +376,15 @@ const openAiJsonSchema = {
     },
     sql: {
       type: "object",
-      additionalProperties: { type: "string" },
+      additionalProperties: {
+        anyOf: [
+          { type: "string" },
+          {
+            type: "array",
+            items: { type: "string" },
+          },
+        ],
+      },
     },
     issues: {
       type: "array",

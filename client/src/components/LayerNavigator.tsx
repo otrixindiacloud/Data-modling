@@ -171,7 +171,30 @@ export default function LayerNavigator() {
                     variant={isActive ? "default" : "ghost"}
                     size="sm"
                     onClick={() => {
+                      if (!isAvailable || isActive) {
+                        return;
+                      }
+
+                      if (typeof window !== "undefined") {
+                        try {
+                          window.sessionStorage.setItem("modeler:pendingLayer", layer);
+                          if (model?.id) {
+                            window.sessionStorage.setItem("modeler:pendingModelId", model.id.toString());
+                          } else {
+                            window.sessionStorage.removeItem("modeler:pendingModelId");
+                          }
+                        } catch (error) {
+                          console.warn("Failed to persist pending layer before reload", error);
+                        }
+                      }
+
                       setCurrentLayer(layer);
+
+                      if (typeof window !== "undefined") {
+                        setTimeout(() => {
+                          window.location.reload();
+                        }, 50);
+                      }
                     }}
                     disabled={!isAvailable}
                     className="h-9 w-9 p-0 relative"

@@ -15,6 +15,20 @@
       "when": 1759390706323,
       "tag": "0001_brainy_hellion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762200000000,
+      "tag": "0004_rename_attributes_table",
+      "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762203600000,
+      "tag": "0005_ensure_data_object_relationships",
+      "breakpoints": false
     }
   ]
 }

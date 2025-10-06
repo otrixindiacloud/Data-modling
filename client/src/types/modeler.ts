@@ -54,12 +54,24 @@ export interface DataSourceConnection {
   metadata?: TableMetadata[];
 }
 
+export interface ForeignKeyMetadata {
+  constraintName: string;
+  columns: string[];
+  referencedSchema?: string;
+  referencedTable: string;
+  referencedColumns: string[];
+  updateRule?: string;
+  deleteRule?: string;
+  relationshipType?: "1:1" | "1:N" | "N:1" | "N:M" | "M:N";
+}
+
 export interface TableMetadata {
   name: string;
   schema?: string;
   originalName?: string;
   columns: ColumnMetadata[];
   rowCount?: number;
+  foreignKeys?: ForeignKeyMetadata[];
 }
 
 export interface ColumnMetadata {

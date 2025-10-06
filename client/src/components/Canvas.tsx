@@ -44,6 +44,30 @@ import AutoLayoutManager from "./Canvas/AutoLayoutManager";
 import { updateDynamicColors } from "@/utils/colorUtils";
 import type { ModelLayer } from "@/types/modeler";
 
+const isManyToManyRelationship = (type?: string | null): boolean =>
+  type === "N:M" || type === "M:N";
+
+const getRelationshipStrokeColor = (type?: string | null): string => {
+  switch (type) {
+    case "1:1":
+      return "#10b981";
+    case "1:N":
+    case "N:1":
+      return "#3b82f6";
+    case "N:M":
+    case "M:N":
+      return "#8b5cf6";
+    default:
+      return "#8b5cf6";
+  }
+};
+
+const buildRelationshipEdgeStyle = (type?: string | null, isAttribute = false) => ({
+  stroke: getRelationshipStrokeColor(type),
+  strokeWidth: 2,
+  ...(isAttribute ? { strokeDasharray: "5,5" } : {}),
+});
+
 // Define nodeTypes outside component to avoid recreation warning
 const nodeTypes: NodeTypes = {
   dataObject: DataObjectNode,
@@ -327,18 +351,53 @@ function CanvasComponent() {
       // Clear history first to prevent conflicts with new data
       clearHistory();
       
-      setNodes(canvasData.nodes);
-      setEdges(canvasData.edges);
+      const processedNodes = canvasData.nodes;
+      const processedEdges = (canvasData.edges ?? [])
+        .filter((edge: any) => Boolean(edge))
+        .map((edge: any) => {
+          const edgeData = edge.data ?? {};
+          const relationshipType = edgeData.relationshipType ?? edge.label ?? "1:N";
+          const isAttributeRelationship = edgeData.isAttributeRelationship ?? (
+            edgeData.sourceAttributeId != null && edgeData.targetAttributeId != null
+          );
+
+          const derivedSourceHandle = isAttributeRelationship && edgeData.sourceAttributeId
+            ? `attr-${edgeData.sourceAttributeId}-source`
+            : undefined;
+          const derivedTargetHandle = isAttributeRelationship && edgeData.targetAttributeId
+            ? `attr-${edgeData.targetAttributeId}-target`
+            : undefined;
+
+          return {
+            ...edge,
+            sourceHandle: isAttributeRelationship ? edge.sourceHandle ?? derivedSourceHandle : edge.sourceHandle,
+            targetHandle: isAttributeRelationship ? edge.targetHandle ?? derivedTargetHandle : edge.targetHandle,
+            animated: edge.animated ?? isManyToManyRelationship(relationshipType),
+            style: edge.style ?? buildRelationshipEdgeStyle(relationshipType, isAttributeRelationship),
+            labelStyle: edge.labelStyle ?? { fontSize: isAttributeRelationship ? 10 : 12, fontWeight: "bold" },
+            data: {
+              ...edgeData,
+              relationshipType,
+              sourceAttributeId: edgeData.sourceAttributeId ?? null,
+              targetAttributeId: edgeData.targetAttributeId ?? null,
+              relationshipLevel: edgeData.relationshipLevel ?? (isAttributeRelationship ? "attribute" : "object"),
+              isAttributeRelationship,
+            },
+          };
+        });
+
+      setNodes(processedNodes);
+      setEdges(processedEdges);
       
       // Sync nodes and edges to the store for PropertiesPanel
-      setStoreNodes(canvasData.nodes);
-      setStoreEdges(canvasData.edges);
+      setStoreNodes(processedNodes);
+      setStoreEdges(processedEdges);
       
       // Initialize history with current state after data is loaded
       if (canvasData.nodes.length > 0) {
         setTimeout(() => {
           saveToHistory('initial', 'Initial canvas state', 
-            `Loaded model with ${canvasData.nodes.length} objects and ${canvasData.edges.length} relationships`);
+            `Loaded model with ${processedNodes.length} objects and ${processedEdges.length} relationships`);
           setIsDataLoading(false);
           
           // Fit view after data loads with some delay to ensure React Flow is ready
@@ -1027,16 +1086,14 @@ function CanvasComponent() {
       source: pendingConnection.source,
       target: pendingConnection.target,
       type: "smoothstep",
-      animated: relationshipType === 'N:M',
-      style: {
-        stroke: relationshipType === '1:1' ? '#10b981' : relationshipType === '1:N' ? '#3b82f6' : '#8b5cf6',
-        strokeWidth: 2,
-      },
+      animated: isManyToManyRelationship(relationshipType),
+      style: buildRelationshipEdgeStyle(relationshipType),
       label: relationshipType,
       labelStyle: { fontSize: 12, fontWeight: 'bold' },
       data: {
         relationshipType,
         dataObjectRelationshipId: null,
+        isAttributeRelationship: false,
       },
     };
     
@@ -1098,12 +1155,10 @@ function CanvasComponent() {
       source: attributeConnection.sourceNode.id,
       target: attributeConnection.targetNode.id,
       type: "smoothstep",
-      animated: relationshipData.type === 'N:M',
-      style: {
-        stroke: relationshipData.type === '1:1' ? '#10b981' : relationshipData.type === '1:N' ? '#3b82f6' : '#8b5cf6',
-        strokeWidth: 2,
-        strokeDasharray: '5,5', // Dashed line to differentiate from object relationships
-      },
+      animated: isManyToManyRelationship(relationshipData.type),
+      sourceHandle: `attr-${relationshipData.sourceAttributeId}-source`,
+      targetHandle: `attr-${relationshipData.targetAttributeId}-target`,
+      style: buildRelationshipEdgeStyle(relationshipData.type, true),
       label: relationshipData.type,
       labelStyle: { fontSize: 10, fontWeight: 'bold' },
       data: {
@@ -1111,6 +1166,7 @@ function CanvasComponent() {
         sourceAttributeId: relationshipData.sourceAttributeId,
         targetAttributeId: relationshipData.targetAttributeId,
         isAttributeRelationship: true,
+        relationshipLevel: 'attribute' as const,
         dataObjectRelationshipId: null,
       },
     };
@@ -1238,11 +1294,11 @@ function CanvasComponent() {
             ? {
                 ...edge,
                 label: relationshipType,
-                animated: relationshipType === 'N:M',
-                style: {
-                  ...edge.style,
-                  stroke: relationshipType === '1:1' ? '#10b981' : relationshipType === '1:N' ? '#3b82f6' : '#8b5cf6',
-                },
+                animated: isManyToManyRelationship(relationshipType),
+                style: buildRelationshipEdgeStyle(
+                  relationshipType,
+                  Boolean(edge.data?.isAttributeRelationship)
+                ),
                 data: {
                   ...edge.data,
                   relationshipType,

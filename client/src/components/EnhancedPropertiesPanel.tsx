@@ -72,7 +72,7 @@ const dataTypes = {
 };
 
 export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, onToggleCollapse }: EnhancedPropertiesPanelProps) {
-  const { selectedObjectId, currentModel, selectedNodeId } = useModelerStore();
+  const { selectedObjectId, requireModelBeforeAction } = useModelerStore();
   const [activeTab, setActiveTab] = useState("properties");
   const [isAddingAttribute, setIsAddingAttribute] = useState(false);
   const [editingAttributeId, setEditingAttributeId] = useState<number | null>(null);
@@ -350,6 +350,15 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
     setAttributeForm(initialAttributeForm);
   };
 
+  const handleAddDataObject = () => {
+    if (!requireModelBeforeAction("Select a data model before adding a data object.")) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("openAddObjectModal"));
+    }
+  };
+
   // Enhanced selection event handling to fix single-click selection
   useEffect(() => {
     const handleObjectSelection = (event: CustomEvent) => {
@@ -414,13 +423,24 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
 
   if (!selectedObjectId || !selectedObject) {
     return (
-      <div className="h-full flex flex-col">
+      <div className="h-full max-h-screen flex flex-col overflow-hidden">
         <div className="p-4 border-b border-border bg-card">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-foreground flex items-center">
-              <Settings className="h-4 w-4 mr-2" />
-              Properties
-            </h2>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground flex items-center">
+                <Settings className="h-4 w-4 mr-2" />
+                Properties
+              </h2>
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleAddDataObject}
+                data-testid="button-add-data-object"
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Add Data Object
+              </Button>
+            </div>
             {onClose && (
               <Button
                 variant="ghost"
@@ -448,14 +468,25 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
   }
 
   return (
-    <div className="h-full flex flex-col bg-background border-l border-border">
+    <div className="h-full max-h-screen flex flex-col bg-background border-l border-border overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border bg-card">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground flex items-center">
-            <Settings className="h-4 w-4 mr-2" />
-            Properties
-          </h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground flex items-center">
+              <Settings className="h-4 w-4 mr-2" />
+              Properties
+            </h2>
+            <Button
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleAddDataObject}
+              data-testid="button-add-data-object"
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Add Data Object
+            </Button>
+          </div>
           <div className="flex items-center gap-1">
             {onToggleCollapse && (
               <Button
@@ -493,7 +524,7 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
       </div>
 
       <div className="flex-1 min-h-0">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
           <TabsList className="grid w-full grid-cols-2 px-4 pt-4">
             <TabsTrigger value="properties" className="text-xs" data-testid="tab-properties">
               Properties
@@ -503,8 +534,8 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="properties" className="flex-1 overflow-hidden px-4 pb-4 pt-2">
-            <div className="h-full pr-3 overflow-hidden">
+          <TabsContent value="properties" className="flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-2">
+            <div className="h-full min-h-0 pr-3 overflow-y-auto">
               <div className="space-y-4">
                 {/* Basic Properties */}
                 <div className="border border-border rounded-lg">
@@ -600,8 +631,8 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
             </div>
           </TabsContent>
 
-          <TabsContent value="attributes" className="flex-1 overflow-hidden px-4 pb-4 pt-2">
-            <div className="h-full flex flex-col space-y-4">
+          <TabsContent value="attributes" className="flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-2">
+            <div className="h-full min-h-0 flex flex-col space-y-4 overflow-hidden">
               {/* Add Attribute Button */}
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">Attributes</h3>
@@ -657,7 +688,7 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
               </div>
 
               {/* Attributes List */}
-              <div className="flex-1 pr-3 overflow-hidden">
+              <div className="flex-1 min-h-0 pr-3 overflow-y-auto">
                 {attributesLoading ? (
                   <div className="text-center py-6 text-muted-foreground">
                     <div className="text-xs">Loading attributes...</div>

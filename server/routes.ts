@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { aiEngine } from "./services/aiEngine";
 import { dataConnectors, type ADLSConnectionConfig, type DatabaseConnectionConfig, type TableMetadata } from "./services/dataConnectors";
+import { generateHeuristicForeignKeys } from "./services/relationshipHeuristics";
 import { exportService } from "./services/exportService";
 import { modelingAgentService } from "./services/modelingAgent";
 
@@ -106,7 +107,12 @@ import {
   type DataArea,
   type DataObjectRelationship,
   type Attribute,
-  type System
+  type System,
+  type InsertDataObject,
+  type InsertAttribute,
+  type InsertDataModelObject,
+  type InsertDataModelAttribute,
+  type InsertDataObjectRelationship
 } from "@shared/schema";
 import { getTargetSystemTemplate } from "./services/targetSystemTemplates";
 import multer from "multer";
@@ -137,6 +143,7 @@ const systemSyncRequestSchema = z.object({
   dataAreaId: z.number().int().positive().nullable().optional(),
   metadataOnly: z.boolean().default(false).optional(),
 });
+
 
 const modelingAgentRequestSchema = z
   .object({
@@ -237,6 +244,366 @@ function findMatchingDataObjectRelationship(
   );
 }
 
+type RelationshipLevel = "object" | "attribute";
+
+interface ModelFamily {
+  conceptual: DataModel;
+  logical?: DataModel;
+  physical?: DataModel;
+  members: DataModel[];
+}
+
+function findConceptualRoot(
+  model: DataModel,
+  modelById: Map<number, DataModel>,
+): DataModel {
+  let current: DataModel = model;
+  const visited = new Set<number>();
+
+  while (current.layer !== "conceptual" && current.parentModelId) {
+    const parentId = current.parentModelId;
+    if (visited.has(parentId)) {
+      break;
+    }
+
+    visited.add(parentId);
+    const parent = modelById.get(parentId);
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+
+  return current.layer === "conceptual" ? current : model;
+}
+
+async function resolveModelFamily(model: DataModel): Promise<ModelFamily> {
+  const allModels = await storage.getDataModels();
+  const modelById = new Map(allModels.map((entry) => [entry.id, entry]));
+  const conceptualRoot = findConceptualRoot(model, modelById);
+
+  const members = allModels.filter((candidate) => {
+    const candidateRoot = findConceptualRoot(candidate, modelById);
+    return candidateRoot.id === conceptualRoot.id;
+  });
+
+  let logical = members.find((entry) => entry.layer === "logical");
+  let physical = members.find((entry) => entry.layer === "physical");
+
+  if (model.layer === "logical") {
+    logical = model;
+  }
+
+  if (model.layer === "physical") {
+    physical = model;
+  }
+
+  return {
+    conceptual: conceptualRoot,
+    logical,
+    physical,
+    members,
+  };
+}
+
+function findDataModelAttributeId(
+  attributes: DataModelAttribute[],
+  modelId: number,
+  modelObjectId: number,
+  attributeId: number,
+): number | undefined {
+  const match = attributes.find(
+    (entry) => entry.modelId === modelId && entry.modelObjectId === modelObjectId && entry.attributeId === attributeId,
+  );
+  return match?.id;
+}
+
+interface RelationshipSyncInput {
+  baseModel: DataModel;
+  sourceObjectId: number;
+  targetObjectId: number;
+  type: string;
+  relationshipLevel: RelationshipLevel;
+  sourceAttributeId: number | null;
+  targetAttributeId: number | null;
+  name?: string | null;
+  description?: string | null;
+}
+
+async function synchronizeFamilyRelationships(
+  params: RelationshipSyncInput,
+): Promise<Map<number, DataModelObjectRelationship>> {
+  const family = await resolveModelFamily(params.baseModel);
+  const dataModelAttributes = await storage.getDataModelAttributes();
+  const relationshipsByModelId = new Map<number, DataModelObjectRelationship>();
+  const modelObjectsCache = new Map<number, DataModelObject[]>();
+  const relationshipsCache = new Map<number, DataModelObjectRelationship[]>();
+
+  const getModelObjects = async (modelId: number): Promise<DataModelObject[]> => {
+    if (!modelObjectsCache.has(modelId)) {
+      modelObjectsCache.set(modelId, await storage.getDataModelObjectsByModel(modelId));
+    }
+    return modelObjectsCache.get(modelId)!;
+  };
+
+  const getModelRelationships = async (modelId: number): Promise<DataModelObjectRelationship[]> => {
+    if (!relationshipsCache.has(modelId)) {
+      relationshipsCache.set(modelId, await storage.getDataModelObjectRelationshipsByModel(modelId));
+    }
+    return relationshipsCache.get(modelId)!;
+  };
+
+  const updateRelationshipCache = (modelId: number, relationships: DataModelObjectRelationship[]) => {
+    relationshipsCache.set(modelId, relationships);
+  };
+
+  const modelsToSync = [family.conceptual, family.logical, family.physical].filter(
+    (entry): entry is DataModel => Boolean(entry),
+  );
+
+  for (const modelToSync of modelsToSync) {
+    const modelObjects = await getModelObjects(modelToSync.id);
+    const sourceModelObject = modelObjects.find((entry) => entry.objectId === params.sourceObjectId);
+    const targetModelObject = modelObjects.find((entry) => entry.objectId === params.targetObjectId);
+
+    if (!sourceModelObject || !targetModelObject) {
+      continue;
+    }
+
+    let expectedLevel: RelationshipLevel = params.relationshipLevel;
+    let sourceModelAttributeId: number | undefined;
+    let targetModelAttributeId: number | undefined;
+
+    if (
+      expectedLevel === "attribute" &&
+      params.sourceAttributeId !== null &&
+      params.targetAttributeId !== null
+    ) {
+      // Try to find model-specific attribute IDs
+      sourceModelAttributeId = findDataModelAttributeId(
+        dataModelAttributes,
+        modelToSync.id,
+        sourceModelObject.id,
+        params.sourceAttributeId,
+      );
+      targetModelAttributeId = findDataModelAttributeId(
+        dataModelAttributes,
+        modelToSync.id,
+        targetModelObject.id,
+        params.targetAttributeId,
+      );
+
+      // If model attributes don't exist, create them
+      if (!sourceModelAttributeId || !targetModelAttributeId) {
+        console.log(`Model attributes not found for model ${modelToSync.id}, creating them...`);
+        
+        if (!sourceModelAttributeId && params.sourceAttributeId) {
+          const globalAttr = await storage.getAttribute(params.sourceAttributeId);
+          if (globalAttr) {
+            const newModelAttr = await storage.createDataModelAttribute({
+              attributeId: params.sourceAttributeId,
+              modelObjectId: sourceModelObject.id,
+              modelId: modelToSync.id,
+              conceptualType: globalAttr.conceptualType,
+              logicalType: globalAttr.logicalType,
+              physicalType: globalAttr.physicalType,
+              nullable: globalAttr.nullable,
+              isPrimaryKey: globalAttr.isPrimaryKey,
+              isForeignKey: globalAttr.isForeignKey,
+              orderIndex: globalAttr.orderIndex,
+            });
+            sourceModelAttributeId = newModelAttr.id;
+            dataModelAttributes.push(newModelAttr);
+          }
+        }
+        
+        if (!targetModelAttributeId && params.targetAttributeId) {
+          const globalAttr = await storage.getAttribute(params.targetAttributeId);
+          if (globalAttr) {
+            const newModelAttr = await storage.createDataModelAttribute({
+              attributeId: params.targetAttributeId,
+              modelObjectId: targetModelObject.id,
+              modelId: modelToSync.id,
+              conceptualType: globalAttr.conceptualType,
+              logicalType: globalAttr.logicalType,
+              physicalType: globalAttr.physicalType,
+              nullable: globalAttr.nullable,
+              isPrimaryKey: globalAttr.isPrimaryKey,
+              isForeignKey: globalAttr.isForeignKey,
+              orderIndex: globalAttr.orderIndex,
+            });
+            targetModelAttributeId = newModelAttr.id;
+            dataModelAttributes.push(newModelAttr);
+          }
+        }
+        
+        // If we still don't have model attribute IDs, fall back to object level
+        if (!sourceModelAttributeId || !targetModelAttributeId) {
+          expectedLevel = "object";
+        }
+      }
+    } else {
+      expectedLevel = "object";
+    }
+
+    const existingRelationships = await getModelRelationships(modelToSync.id);
+    const levelMatches = (relationship: DataModelObjectRelationship): boolean => {
+      const currentLevel: RelationshipLevel =
+        relationship.relationshipLevel === "attribute" ? "attribute" : "object";
+      if (expectedLevel === "attribute") {
+        return (
+          currentLevel === "attribute" &&
+          (relationship.sourceAttributeId ?? undefined) === sourceModelAttributeId &&
+          (relationship.targetAttributeId ?? undefined) === targetModelAttributeId
+        );
+      }
+      return currentLevel === "object";
+    };
+
+    const existing = existingRelationships.find(
+      (relationship) =>
+        relationship.sourceModelObjectId === sourceModelObject.id &&
+        relationship.targetModelObjectId === targetModelObject.id &&
+        levelMatches(relationship),
+    );
+
+    if (existing) {
+      const updatePayload: Partial<InsertDataModelObjectRelationship> = {};
+      if (existing.type !== params.type) {
+        updatePayload.type = params.type;
+      }
+
+      const currentLevel: RelationshipLevel =
+        existing.relationshipLevel === "attribute" ? "attribute" : "object";
+      if (currentLevel !== expectedLevel) {
+        updatePayload.relationshipLevel = expectedLevel;
+      }
+
+      if ((existing.sourceAttributeId ?? undefined) !== sourceModelAttributeId) {
+        updatePayload.sourceAttributeId = sourceModelAttributeId;
+      }
+
+      if ((existing.targetAttributeId ?? undefined) !== targetModelAttributeId) {
+        updatePayload.targetAttributeId = targetModelAttributeId;
+      }
+
+      if ((existing.name ?? null) !== (params.name ?? null)) {
+        updatePayload.name = params.name ?? null;
+      }
+
+      if ((existing.description ?? null) !== (params.description ?? null)) {
+        updatePayload.description = params.description ?? null;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        const updated = await storage.updateDataModelObjectRelationship(existing.id, updatePayload);
+        relationshipsByModelId.set(modelToSync.id, updated);
+        updateRelationshipCache(
+          modelToSync.id,
+          existingRelationships.map((entry) => (entry.id === updated.id ? updated : entry)),
+        );
+      } else {
+        relationshipsByModelId.set(modelToSync.id, existing);
+      }
+
+      continue;
+    }
+
+    const created = await storage.createDataModelObjectRelationship({
+      sourceModelObjectId: sourceModelObject.id,
+      targetModelObjectId: targetModelObject.id,
+      type: params.type,
+      relationshipLevel: expectedLevel,
+      sourceAttributeId: sourceModelAttributeId,
+      targetAttributeId: targetModelAttributeId,
+      modelId: modelToSync.id,
+      layer: modelToSync.layer as "conceptual" | "logical" | "physical",
+      name: params.name === undefined ? undefined : params.name,
+      description: params.description === undefined ? undefined : params.description,
+    });
+
+    relationshipsByModelId.set(modelToSync.id, created);
+    updateRelationshipCache(modelToSync.id, [...existingRelationships, created]);
+  }
+
+  return relationshipsByModelId;
+}
+
+async function removeFamilyRelationships(params: RelationshipSyncInput): Promise<void> {
+  const family = await resolveModelFamily(params.baseModel);
+  const dataModelAttributes = await storage.getDataModelAttributes();
+  const modelsToSync = [family.conceptual, family.logical, family.physical].filter(
+    (entry): entry is DataModel => Boolean(entry),
+  );
+
+  for (const modelToSync of modelsToSync) {
+    const modelObjects = await storage.getDataModelObjectsByModel(modelToSync.id);
+    const sourceModelObject = modelObjects.find((entry) => entry.objectId === params.sourceObjectId);
+    const targetModelObject = modelObjects.find((entry) => entry.objectId === params.targetObjectId);
+
+    if (!sourceModelObject || !targetModelObject) {
+      continue;
+    }
+
+    let expectedLevel: RelationshipLevel = params.relationshipLevel;
+    let sourceModelAttributeId: number | undefined;
+    let targetModelAttributeId: number | undefined;
+
+    if (
+      expectedLevel === "attribute" &&
+      params.sourceAttributeId !== null &&
+      params.targetAttributeId !== null
+    ) {
+      // Try to find model-specific attribute IDs
+      sourceModelAttributeId = findDataModelAttributeId(
+        dataModelAttributes,
+        modelToSync.id,
+        sourceModelObject.id,
+        params.sourceAttributeId,
+      );
+      targetModelAttributeId = findDataModelAttributeId(
+        dataModelAttributes,
+        modelToSync.id,
+        targetModelObject.id,
+        params.targetAttributeId,
+      );
+
+      // If model attributes don't exist, we can't match them, so skip this level
+      if (!sourceModelAttributeId || !targetModelAttributeId) {
+        expectedLevel = "object";
+      }
+    } else {
+      expectedLevel = "object";
+    }
+
+    const relationships = await storage.getDataModelObjectRelationshipsByModel(modelToSync.id);
+
+    const matches = relationships.filter((relationship) => {
+      if (
+        relationship.sourceModelObjectId !== sourceModelObject.id ||
+        relationship.targetModelObjectId !== targetModelObject.id
+      ) {
+        return false;
+      }
+
+      const currentLevel: RelationshipLevel =
+        relationship.relationshipLevel === "attribute" ? "attribute" : "object";
+
+      if (expectedLevel === "attribute") {
+        return (
+          currentLevel === "attribute" &&
+          (relationship.sourceAttributeId ?? undefined) === sourceModelAttributeId &&
+          (relationship.targetAttributeId ?? undefined) === targetModelAttributeId
+        );
+      }
+
+      return currentLevel === "object";
+    });
+
+    await Promise.all(matches.map((relationship) => storage.deleteDataModelObjectRelationship(relationship.id)));
+  }
+}
+
 function coerceNumericId(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const parsed = Number(value);
@@ -268,6 +635,260 @@ function extractPreferredDomainId(system: System, override?: number | null): num
   }
 
   return null;
+}
+
+type ModelLayer = "conceptual" | "logical" | "physical";
+
+const positionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+});
+
+const modelObjectConfigSchema = z
+  .object({
+    position: positionSchema.nullable().optional(),
+    targetSystemId: z.number().int().positive().nullable().optional(),
+    metadata: z.record(z.any()).nullable().optional(),
+    isVisible: z.boolean().optional(),
+    layerSpecificConfig: z.record(z.any()).nullable().optional(),
+  })
+  .partial();
+
+const perLayerModelObjectConfigSchema = z
+  .object({
+    conceptual: modelObjectConfigSchema.optional(),
+    logical: modelObjectConfigSchema.optional(),
+    physical: modelObjectConfigSchema.optional(),
+  })
+  .partial();
+
+const attributeInputSchema = z
+  .object({
+    name: z.string().min(1),
+    conceptualType: z.string().nullable().optional(),
+    logicalType: z.string().nullable().optional(),
+    physicalType: z.string().nullable().optional(),
+    dataType: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    nullable: z.boolean().optional(),
+    isPrimaryKey: z.boolean().optional(),
+    isForeignKey: z.boolean().optional(),
+    length: z.number().int().nullable().optional(),
+    precision: z.number().int().nullable().optional(),
+    scale: z.number().int().nullable().optional(),
+    orderIndex: z.number().int().optional(),
+    metadata: z.record(z.any()).optional(),
+  })
+  .strict();
+
+const relationshipInputSchema = z
+  .object({
+    targetObjectId: z.number().int().positive(),
+    type: relationshipTypeEnum.default("1:N").optional(),
+    relationshipLevel: z.enum(["object", "attribute"] as const).optional(),
+    sourceAttributeName: z.string().nullable().optional(),
+    targetAttributeName: z.string().nullable().optional(),
+    name: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    metadata: z.record(z.any()).nullable().optional(),
+  })
+  .strict();
+
+type AttributeInput = z.infer<typeof attributeInputSchema>;
+type RelationshipInput = z.infer<typeof relationshipInputSchema>;
+type ModelObjectConfigInput = z.infer<typeof modelObjectConfigSchema>;
+
+interface LayerCreationResult {
+  layer: ModelLayer;
+  model: DataModel;
+  object: DataObject;
+  modelObject: DataModelObject;
+  attributes: Attribute[];
+  dataModelAttributes: DataModelAttribute[];
+}
+
+function mergeLayerConfig(base: ModelObjectConfigInput, override?: ModelObjectConfigInput): ModelObjectConfigInput {
+  if (!override) {
+    return base;
+  }
+
+  const merged: ModelObjectConfigInput = {
+    ...base,
+  };
+
+  if (override.position !== undefined) {
+    merged.position = override.position;
+  }
+  if (override.targetSystemId !== undefined) {
+    merged.targetSystemId = override.targetSystemId;
+  }
+  if (override.metadata !== undefined) {
+    merged.metadata = override.metadata;
+  }
+  if (override.isVisible !== undefined) {
+    merged.isVisible = override.isVisible;
+  }
+  if (override.layerSpecificConfig !== undefined) {
+    merged.layerSpecificConfig = override.layerSpecificConfig;
+  }
+
+  return merged;
+}
+
+async function replicateObjectToLayer(params: {
+  layer: ModelLayer;
+  conceptualModel: DataModel;
+  conceptualObject: DataObject;
+  targetModel: DataModel;
+  baseObjectPayload: InsertDataObject;
+  attributeInputs: AttributeInput[];
+  config: ModelObjectConfigInput;
+  modelObjectsCache: Map<number, DataModelObject[]>;
+  attributesCache: Map<number, Attribute[]>;
+}): Promise<LayerCreationResult> {
+  const {
+    layer,
+    conceptualModel,
+    conceptualObject,
+    targetModel,
+    baseObjectPayload,
+    attributeInputs,
+    config,
+    modelObjectsCache,
+    attributesCache,
+  } = params;
+
+  const metadataBase =
+    typeof baseObjectPayload.metadata === "object" && baseObjectPayload.metadata !== null
+      ? { ...baseObjectPayload.metadata }
+      : {};
+
+  const clonePayload: InsertDataObject = {
+    ...baseObjectPayload,
+    modelId: targetModel.id,
+    metadata: {
+      ...metadataBase,
+      originConceptualObjectId: conceptualObject.id,
+      originConceptualModelId: conceptualModel.id,
+    },
+    position: config.position ?? baseObjectPayload.position ?? null,
+  };
+
+  if (config.targetSystemId !== undefined) {
+    clonePayload.targetSystemId = config.targetSystemId;
+  } else if (targetModel.targetSystemId !== null && targetModel.targetSystemId !== undefined) {
+    clonePayload.targetSystemId = targetModel.targetSystemId;
+  }
+
+  const clonedObject = await storage.createDataObject(clonePayload);
+
+  const modelObjectPayload: InsertDataModelObject = {
+    objectId: clonedObject.id,
+    modelId: targetModel.id,
+    targetSystemId:
+      config.targetSystemId ??
+      clonePayload.targetSystemId ??
+      (targetModel.targetSystemId ?? null),
+    position: config.position ?? clonePayload.position ?? null,
+    metadata: {
+      ...(config.metadata ?? {}),
+      originConceptualObjectId: conceptualObject.id,
+      originConceptualModelId: conceptualModel.id,
+      layer,
+    },
+    isVisible: config.isVisible ?? true,
+    layerSpecificConfig: {
+      ...(config.layerSpecificConfig ?? {}),
+      layer,
+      originConceptualObjectId: conceptualObject.id,
+      originConceptualModelId: conceptualModel.id,
+    },
+  } satisfies InsertDataModelObject;
+
+  const modelObject = await storage.createDataModelObject(modelObjectPayload);
+
+  if (!modelObjectsCache.has(targetModel.id)) {
+    modelObjectsCache.set(targetModel.id, []);
+  }
+  modelObjectsCache.get(targetModel.id)!.push(modelObject);
+
+    const createdAttributes: Attribute[] = [];
+    const createdDataModelAttributes: DataModelAttribute[] = [];
+
+  for (let index = 0; index < attributeInputs.length; index++) {
+    const attributeInput = attributeInputs[index];
+
+    const attributePayload: InsertAttribute = {
+      name: attributeInput.name,
+      objectId: clonedObject.id,
+      conceptualType:
+        attributeInput.conceptualType ??
+        attributeInput.logicalType ??
+        attributeInput.physicalType ??
+        attributeInput.dataType ??
+        undefined,
+      logicalType:
+        attributeInput.logicalType ??
+        attributeInput.conceptualType ??
+        attributeInput.physicalType ??
+        attributeInput.dataType ??
+        undefined,
+      physicalType:
+        attributeInput.physicalType ??
+        attributeInput.logicalType ??
+        attributeInput.conceptualType ??
+        attributeInput.dataType ??
+        undefined,
+      dataType: attributeInput.dataType ?? undefined,
+      length: attributeInput.length ?? undefined,
+      precision: attributeInput.precision ?? undefined,
+      scale: attributeInput.scale ?? undefined,
+      nullable: attributeInput.nullable,
+      isPrimaryKey: attributeInput.isPrimaryKey,
+      isForeignKey: attributeInput.isForeignKey,
+      orderIndex: attributeInput.orderIndex ?? index,
+      description: attributeInput.description ?? undefined,
+    } satisfies InsertAttribute;
+
+    const attribute = await storage.createAttribute(attributePayload);
+    createdAttributes.push(attribute);
+
+    if (!attributesCache.has(clonedObject.id)) {
+      attributesCache.set(clonedObject.id, []);
+    }
+    attributesCache.get(clonedObject.id)!.push(attribute);
+
+    const dataModelAttributePayload: InsertDataModelAttribute = {
+      attributeId: attribute.id,
+      modelObjectId: modelObject.id,
+      modelId: targetModel.id,
+      conceptualType: attributeInput.conceptualType ?? attribute.conceptualType ?? null,
+      logicalType: attributeInput.logicalType ?? attribute.logicalType ?? null,
+      physicalType: attributeInput.physicalType ?? attribute.physicalType ?? null,
+      nullable: attributeInput.nullable ?? attribute.nullable ?? true,
+      isPrimaryKey: attributeInput.isPrimaryKey ?? attribute.isPrimaryKey ?? false,
+      isForeignKey: attributeInput.isForeignKey ?? attribute.isForeignKey ?? false,
+      orderIndex: attributeInput.orderIndex ?? attribute.orderIndex ?? index,
+      layerSpecificConfig: {
+        ...(attributeInput.metadata ?? {}),
+        originConceptualObjectId: conceptualObject.id,
+        originConceptualModelId: conceptualModel.id,
+        originConceptualAttributeName: attributeInput.name,
+      },
+    } satisfies InsertDataModelAttribute;
+
+    const dataModelAttribute = await storage.createDataModelAttribute(dataModelAttributePayload);
+    createdDataModelAttributes.push(dataModelAttribute);
+  }
+
+  return {
+    layer,
+    model: targetModel,
+    object: clonedObject,
+    modelObject,
+    attributes: createdAttributes,
+    dataModelAttributes: createdDataModelAttributes,
+  } satisfies LayerCreationResult;
 }
 
 function extractPreferredDataAreaIds(system: System, override?: number[] | null): number[] {
@@ -539,13 +1160,6 @@ async function upsertConfigurationEntry(input: unknown) {
 
     return { configuration: updated, created: false as const };
   }
-
-  const created = await storage.createConfiguration({
-    category: validatedData.category,
-    key: validatedData.key,
-    value: validatedData.value,
-    description: validatedData.description ?? fallbackDescription,
-  });
 
   return { configuration: created, created: true as const };
 }
@@ -1140,61 +1754,464 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/objects", async (req, res) => {
     try {
       console.log("Received object creation request:", req.body);
-      
-      // For now, work with the existing schema that requires modelId
-      // Add a default modelId if not provided (using first available model)
-      let objectData = { ...req.body };
-      if (!objectData.modelId) {
-        // Find the current user's first model or create a default
-        const models = await storage.getDataModels();
-        if (models.length > 0) {
-          objectData.modelId = models[0].id;
-        } else {
-          return res.status(400).json({ 
-            message: "No model available. Please create a model first." 
-          });
+
+      const {
+        attributes: rawAttributes,
+        relationships: rawRelationships,
+        cascade: cascadeFlag,
+        modelObjectConfig: rawModelObjectConfig,
+        layerModelObjectConfig: rawLayerModelObjectConfig,
+        modelObjectConfigs: rawLegacyLayerConfig,
+        ...objectPayload
+      } = (req.body ?? {}) as Record<string, unknown>;
+
+      const validatedData = insertDataObjectSchema.parse(objectPayload);
+
+      const attributeInputs: AttributeInput[] = Array.isArray(rawAttributes)
+        ? z.array(attributeInputSchema).parse(rawAttributes)
+        : [];
+
+      const relationshipInputs: RelationshipInput[] = Array.isArray(rawRelationships)
+        ? z.array(relationshipInputSchema).parse(rawRelationships)
+        : [];
+
+      const baseModelObjectConfig: ModelObjectConfigInput =
+        rawModelObjectConfig && typeof rawModelObjectConfig === "object"
+          ? modelObjectConfigSchema.parse(rawModelObjectConfig)
+          : {};
+
+      const layerConfigSource =
+        rawLayerModelObjectConfig && typeof rawLayerModelObjectConfig === "object"
+          ? rawLayerModelObjectConfig
+          : rawLegacyLayerConfig;
+
+      const perLayerConfig =
+        layerConfigSource && typeof layerConfigSource === "object"
+          ? perLayerModelObjectConfigSchema.parse(layerConfigSource)
+          : {};
+
+      const cascadeEnabled = cascadeFlag !== false;
+
+      const baseModel = await storage.getDataModel(validatedData.modelId);
+      if (!baseModel) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
+      const modelObjectsCache = new Map<number, DataModelObject[]>();
+      const attributesCache = new Map<number, Attribute[]>();
+      const dataObjectCache = new Map<number, DataObject | null>();
+  const fullyLoadedModelIds = new Set<number>();
+
+      const resolveLayerConfig = (layer: ModelLayer): ModelObjectConfigInput =>
+        mergeLayerConfig(baseModelObjectConfig, (perLayerConfig as Record<ModelLayer, ModelObjectConfigInput | undefined>)[layer]);
+
+      const primaryObject = await storage.createDataObject(validatedData);
+      dataObjectCache.set(primaryObject.id, primaryObject);
+
+      const baseLayer = (baseModel.layer ?? "conceptual") as ModelLayer;
+      const baseLayerConfig = resolveLayerConfig(baseLayer);
+
+      const baseModelObjectPayload: InsertDataModelObject = {
+        objectId: primaryObject.id,
+        modelId: baseModel.id,
+        targetSystemId:
+          baseLayerConfig.targetSystemId ??
+          validatedData.targetSystemId ??
+          (baseModel.targetSystemId ?? null),
+        position: baseLayerConfig.position ?? validatedData.position ?? null,
+        metadata: {
+          ...(validatedData.metadata ?? {}),
+          ...(baseLayerConfig.metadata ?? {}),
+          layer: baseLayer,
+          originConceptualObjectId: baseLayer === "conceptual" ? primaryObject.id : null,
+        },
+        isVisible: baseLayerConfig.isVisible ?? true,
+        layerSpecificConfig: {
+          ...(baseLayerConfig.layerSpecificConfig ?? {}),
+          layer: baseLayer,
+          originConceptualObjectId: baseLayer === "conceptual" ? primaryObject.id : null,
+        },
+      } satisfies InsertDataModelObject;
+
+      const baseModelObject = await storage.createDataModelObject(baseModelObjectPayload);
+      modelObjectsCache.set(baseModel.id, [baseModelObject]);
+
+      const baseAttributes: Attribute[] = [];
+      const baseDataModelAttributes: DataModelAttribute[] = [];
+
+      if (attributeInputs.length > 0) {
+        for (let index = 0; index < attributeInputs.length; index++) {
+          const attributeInput = attributeInputs[index];
+
+          const attributePayload: InsertAttribute = {
+            name: attributeInput.name,
+            objectId: primaryObject.id,
+            conceptualType:
+              attributeInput.conceptualType ??
+              attributeInput.logicalType ??
+              attributeInput.physicalType ??
+              attributeInput.dataType ??
+              undefined,
+            logicalType: attributeInput.logicalType ?? undefined,
+            physicalType: attributeInput.physicalType ?? undefined,
+            dataType: attributeInput.dataType ?? undefined,
+            length: attributeInput.length ?? undefined,
+            precision: attributeInput.precision ?? undefined,
+            scale: attributeInput.scale ?? undefined,
+            nullable: attributeInput.nullable,
+            isPrimaryKey: attributeInput.isPrimaryKey,
+            isForeignKey: attributeInput.isForeignKey,
+            orderIndex: attributeInput.orderIndex ?? index,
+            description: attributeInput.description ?? undefined,
+          } satisfies InsertAttribute;
+
+          const createdAttribute = await storage.createAttribute(attributePayload);
+          baseAttributes.push(createdAttribute);
+
+          if (!attributesCache.has(primaryObject.id)) {
+            attributesCache.set(primaryObject.id, []);
+          }
+          attributesCache.get(primaryObject.id)!.push(createdAttribute);
+
+          const dataModelAttributePayload: InsertDataModelAttribute = {
+            attributeId: createdAttribute.id,
+            modelObjectId: baseModelObject.id,
+            modelId: baseModel.id,
+            conceptualType: attributeInput.conceptualType ?? createdAttribute.conceptualType ?? null,
+            logicalType: attributeInput.logicalType ?? createdAttribute.logicalType ?? null,
+            physicalType: attributeInput.physicalType ?? createdAttribute.physicalType ?? null,
+            nullable: attributeInput.nullable ?? createdAttribute.nullable ?? true,
+            isPrimaryKey: attributeInput.isPrimaryKey ?? createdAttribute.isPrimaryKey ?? false,
+            isForeignKey: attributeInput.isForeignKey ?? createdAttribute.isForeignKey ?? false,
+            orderIndex: attributeInput.orderIndex ?? createdAttribute.orderIndex ?? index,
+            layerSpecificConfig: {
+              ...(attributeInput.metadata ?? {}),
+              layer: baseLayer,
+              originConceptualObjectId: baseLayer === "conceptual" ? primaryObject.id : null,
+            },
+          } satisfies InsertDataModelAttribute;
+
+          const createdDataModelAttribute = await storage.createDataModelAttribute(dataModelAttributePayload);
+          baseDataModelAttributes.push(createdDataModelAttribute);
         }
       }
-      
-      const validatedData = insertDataObjectSchema.parse(objectData);
-      console.log("Validated data:", validatedData);
-      const object = await storage.createDataObject(validatedData);
-      
-      // Auto-cascade: When creating object in conceptual layer, create in logical and physical layers
-      const currentModel = await storage.getDataModel(validatedData.modelId);
-      if (currentModel?.layer === "conceptual") {
-        // Find all models in the same family
-        const allModels = await storage.getDataModels();
-        const logicalModel = allModels.find(m => m.parentModelId === currentModel.id && m.layer === "logical");
-        const physicalModel = allModels.find(m => m.parentModelId === currentModel.id && m.layer === "physical");
-        
-        // Create object in logical layer
+
+      const createdLayers: Record<ModelLayer, LayerCreationResult | null> = {
+        conceptual: null,
+        logical: null,
+        physical: null,
+      };
+
+      const baseLayerResult: LayerCreationResult = {
+        layer: baseLayer,
+        model: baseModel,
+        object: primaryObject,
+        modelObject: baseModelObject,
+        attributes: baseAttributes,
+        dataModelAttributes: baseDataModelAttributes,
+      };
+
+      createdLayers[baseLayer] = baseLayerResult;
+
+      const allModels = await storage.getDataModels();
+
+      const childrenByParentId = new Map<number, DataModel[]>();
+      for (const model of allModels) {
+        if (model.parentModelId === null || model.parentModelId === undefined) {
+          continue;
+        }
+        const siblings = childrenByParentId.get(model.parentModelId) ?? [];
+        siblings.push(model);
+        childrenByParentId.set(model.parentModelId, siblings);
+      }
+
+      const findDescendantLayer = (ancestor: DataModel | null, layer: ModelLayer): DataModel | null => {
+        if (!ancestor) {
+          return null;
+        }
+
+        const visited = new Set<number>();
+        const queue: DataModel[] = [...(childrenByParentId.get(ancestor.id) ?? [])];
+
+        while (queue.length > 0) {
+          const candidate = queue.shift()!;
+          if (visited.has(candidate.id)) {
+            continue;
+          }
+          visited.add(candidate.id);
+
+          if (candidate.layer === layer) {
+            return candidate;
+          }
+
+          const children = childrenByParentId.get(candidate.id);
+          if (children && children.length > 0) {
+            queue.push(...children);
+          }
+        }
+
+        return null;
+      };
+
+      const conceptualModel =
+        baseLayer === "conceptual"
+          ? baseModel
+          : allModels.find((model) => model.id === baseModel.parentModelId && model.layer === "conceptual") ?? null;
+
+      const logicalModel = findDescendantLayer(conceptualModel, "logical");
+
+      const physicalModel = findDescendantLayer(conceptualModel, "physical") ?? findDescendantLayer(logicalModel, "physical");
+
+      let cascadePerformed = false;
+
+      if (cascadeEnabled && baseLayer === "conceptual") {
         if (logicalModel) {
-          await storage.createDataObject({
-            ...validatedData,
-            modelId: logicalModel.id
+          const logicalResult = await replicateObjectToLayer({
+            layer: "logical",
+            conceptualModel: baseModel,
+            conceptualObject: primaryObject,
+            targetModel: logicalModel,
+            baseObjectPayload: validatedData,
+            attributeInputs,
+            config: resolveLayerConfig("logical"),
+            modelObjectsCache,
+            attributesCache,
           });
+          createdLayers.logical = logicalResult;
         }
-        
-        // Create object in physical layer
+
         if (physicalModel) {
-          await storage.createDataObject({
-            ...validatedData,
-            modelId: physicalModel.id
+          const physicalResult = await replicateObjectToLayer({
+            layer: "physical",
+            conceptualModel: baseModel,
+            conceptualObject: primaryObject,
+            targetModel: physicalModel,
+            baseObjectPayload: validatedData,
+            attributeInputs,
+            config: resolveLayerConfig("physical"),
+            modelObjectsCache,
+            attributesCache,
           });
+          createdLayers.physical = physicalResult;
+        }
+
+        cascadePerformed = Boolean(createdLayers.logical || createdLayers.physical);
+      }
+
+      const ensureModelObjects = async (modelId: number): Promise<DataModelObject[]> => {
+        const cached = modelObjectsCache.get(modelId) ?? [];
+
+        if (!fullyLoadedModelIds.has(modelId)) {
+          const fetched = await storage.getDataModelObjectsByModel(modelId);
+          const mergedById = new Map<number, DataModelObject>();
+
+          for (const entry of [...fetched, ...cached]) {
+            mergedById.set(entry.id, entry);
+          }
+
+          const merged = Array.from(mergedById.values());
+          modelObjectsCache.set(modelId, merged);
+          fullyLoadedModelIds.add(modelId);
+          return merged;
+        }
+
+        return cached;
+      };
+
+      const ensureAttributes = async (objectId: number): Promise<Attribute[]> => {
+        if (!attributesCache.has(objectId)) {
+          const result = await storage.getAttributesByObject(objectId);
+          attributesCache.set(objectId, [...result]);
+        }
+        return attributesCache.get(objectId)!;
+      };
+
+      const resolveTargetModelObject = async (
+        layer: ModelLayer,
+        conceptualObjectId: number,
+        targetModel: DataModel,
+      ): Promise<DataModelObject | null> => {
+        const layerModelObjects = await ensureModelObjects(targetModel.id);
+
+        let direct = layerModelObjects.find((entry) => {
+          const layerConfig = (entry.layerSpecificConfig ?? {}) as Record<string, unknown> | null;
+          if (layerConfig?.originConceptualObjectId === conceptualObjectId) {
+            return true;
+          }
+          const metadata = (entry.metadata ?? {}) as Record<string, unknown> | null;
+          return metadata?.originConceptualObjectId === conceptualObjectId;
+        });
+
+        if (direct) {
+          return direct;
+        }
+
+        const conceptualObject =
+          dataObjectCache.get(conceptualObjectId) ?? (await storage.getDataObject(conceptualObjectId)) ?? null;
+        dataObjectCache.set(conceptualObjectId, conceptualObject);
+
+        if (!conceptualObject) {
+          return null;
+        }
+
+        for (const entry of layerModelObjects) {
+          const targetObject =
+            dataObjectCache.get(entry.objectId) ?? (await storage.getDataObject(entry.objectId)) ?? null;
+          dataObjectCache.set(entry.objectId, targetObject);
+          if (targetObject && targetObject.name === conceptualObject.name) {
+            direct = entry;
+            break;
+          }
+        }
+
+        return direct ?? null;
+      };
+
+      const relationshipSummaries: Array<{
+        layer: ModelLayer;
+        relationship: DataModelObjectRelationship;
+        dataObjectRelationshipId: number | null;
+      }> = [];
+
+      if (relationshipInputs.length > 0) {
+        const baseRelationships = await storage.getDataObjectRelationshipsByObject(primaryObject.id);
+
+        for (const relationshipInput of relationshipInputs) {
+          const targetConceptualObject = await storage.getDataObject(relationshipInput.targetObjectId);
+
+          if (!targetConceptualObject) {
+            console.warn("Target object for relationship not found", relationshipInput.targetObjectId);
+            continue;
+          }
+
+          dataObjectCache.set(targetConceptualObject.id, targetConceptualObject);
+
+          let sourceAttributeId: number | null = null;
+          let targetAttributeId: number | null = null;
+
+          if (relationshipInput.relationshipLevel === "attribute" || relationshipInput.sourceAttributeName || relationshipInput.targetAttributeName) {
+            const sourceAttributes = await ensureAttributes(primaryObject.id);
+            const targetAttributes = await ensureAttributes(targetConceptualObject.id);
+
+            if (relationshipInput.sourceAttributeName) {
+              sourceAttributeId =
+                sourceAttributes.find((attribute) => attribute.name === relationshipInput.sourceAttributeName)?.id ?? null;
+            }
+
+            if (relationshipInput.targetAttributeName) {
+              targetAttributeId =
+                targetAttributes.find((attribute) => attribute.name === relationshipInput.targetAttributeName)?.id ?? null;
+            }
+          }
+
+          const relationshipLevel: "object" | "attribute" =
+            sourceAttributeId !== null && targetAttributeId !== null ? "attribute" : "object";
+
+          let dataObjectRelationship = findMatchingDataObjectRelationship(
+            baseRelationships,
+            primaryObject.id,
+            targetConceptualObject.id,
+            relationshipLevel,
+            sourceAttributeId,
+            targetAttributeId,
+          );
+
+          if (!dataObjectRelationship) {
+            const globalRelationshipPayload: InsertDataObjectRelationship = {
+              sourceDataObjectId: primaryObject.id,
+              targetDataObjectId: targetConceptualObject.id,
+              type: relationshipInput.type ?? "1:N",
+              relationshipLevel,
+              sourceAttributeId: sourceAttributeId ?? undefined,
+              targetAttributeId: targetAttributeId ?? undefined,
+              name: relationshipInput.name ?? undefined,
+              description: relationshipInput.description ?? undefined,
+              metadata: {
+                ...(relationshipInput.metadata ?? {}),
+                createdViaCascade: true,
+              },
+            } satisfies InsertDataObjectRelationship;
+
+            dataObjectRelationship = await storage.createDataObjectRelationship(globalRelationshipPayload);
+            baseRelationships.push(dataObjectRelationship);
+          }
+
+          for (const layer of ["conceptual", "logical", "physical"] as ModelLayer[]) {
+            const layerResult = createdLayers[layer];
+            if (!layerResult) {
+              continue;
+            }
+
+            const sourceModelObject = layerResult.modelObject;
+            const targetModelObject = await resolveTargetModelObject(layer, targetConceptualObject.id, layerResult.model);
+
+            if (!targetModelObject) {
+              continue;
+            }
+
+            let layerSourceAttributeId: number | null = sourceAttributeId;
+            let layerTargetAttributeId: number | null = targetAttributeId;
+
+            if (relationshipLevel === "attribute") {
+              const layerSourceAttributes = await ensureAttributes(layerResult.object.id);
+              const layerTargetAttributes = await ensureAttributes(targetModelObject.objectId);
+
+              if (relationshipInput.sourceAttributeName) {
+                layerSourceAttributeId =
+                  layerSourceAttributes.find((attribute) => attribute.name === relationshipInput.sourceAttributeName)?.id ?? null;
+              }
+
+              if (relationshipInput.targetAttributeName) {
+                layerTargetAttributeId =
+                  layerTargetAttributes.find((attribute) => attribute.name === relationshipInput.targetAttributeName)?.id ?? null;
+              }
+
+              if (!layerSourceAttributeId || !layerTargetAttributeId) {
+                layerSourceAttributeId = null;
+                layerTargetAttributeId = null;
+              }
+            }
+
+            const layerRelationshipPayload = insertDataModelObjectRelationshipSchema.parse({
+              sourceModelObjectId: sourceModelObject.id,
+              targetModelObjectId: targetModelObject.id,
+              type: relationshipInput.type ?? "1:N",
+              relationshipLevel: layerSourceAttributeId && layerTargetAttributeId ? "attribute" : "object",
+              sourceAttributeId: layerSourceAttributeId ?? undefined,
+              targetAttributeId: layerTargetAttributeId ?? undefined,
+              modelId: layerResult.model.id,
+              layer,
+              name: relationshipInput.name ?? undefined,
+              description: relationshipInput.description ?? undefined,
+            });
+
+            const layerRelationship = await storage.createDataModelObjectRelationship(layerRelationshipPayload);
+
+            relationshipSummaries.push({
+              layer,
+              relationship: layerRelationship,
+              dataObjectRelationshipId: dataObjectRelationship?.id ?? null,
+            });
+          }
         }
       }
-      
-      res.status(201).json(object);
+
+
+      res.status(201).json({
+        primaryObject,
+        cascadePerformed,
+        layers: createdLayers,
+        relationships: relationshipSummaries,
+      });
     } catch (error) {
       console.error("Error creating object:", error);
       if ((error as any).errors) {
         console.error("Validation errors:", (error as any).errors);
       }
-      res.status(400).json({ 
+      res.status(400).json({
         message: "Invalid object data",
         error: (error as any).message,
-        details: (error as any).errors || error
+        details: (error as any).errors || error,
       });
     }
   });
@@ -2243,9 +3260,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Model objects not found for provided source/target" });
       }
 
-      const sourceAttributeId = payload.sourceAttributeId ?? null;
-      const targetAttributeId = payload.targetAttributeId ?? null;
-      const relationshipLevel = determineRelationshipLevel(sourceAttributeId, targetAttributeId);
+      // Store the global attribute IDs for the data_object_relationships table
+      const globalSourceAttributeId = payload.sourceAttributeId ?? null;
+      const globalTargetAttributeId = payload.targetAttributeId ?? null;
+      const relationshipLevel = determineRelationshipLevel(globalSourceAttributeId, globalTargetAttributeId);
 
       const existingGlobalRelationships = await storage.getDataObjectRelationshipsByObject(payload.sourceObjectId);
       let dataObjectRelationship = findMatchingDataObjectRelationship(
@@ -2253,8 +3271,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payload.sourceObjectId,
         payload.targetObjectId,
         relationshipLevel,
-        sourceAttributeId,
-        targetAttributeId,
+        globalSourceAttributeId,
+        globalTargetAttributeId,
       );
 
       if (dataObjectRelationship) {
@@ -2264,12 +3282,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updatePayload.type = payload.type;
         }
 
-        if ((dataObjectRelationship.sourceAttributeId ?? null) !== sourceAttributeId) {
-          updatePayload.sourceAttributeId = sourceAttributeId;
+        if ((dataObjectRelationship.sourceAttributeId ?? null) !== globalSourceAttributeId) {
+          updatePayload.sourceAttributeId = globalSourceAttributeId;
         }
 
-        if ((dataObjectRelationship.targetAttributeId ?? null) !== targetAttributeId) {
-          updatePayload.targetAttributeId = targetAttributeId;
+        if ((dataObjectRelationship.targetAttributeId ?? null) !== globalTargetAttributeId) {
+          updatePayload.targetAttributeId = globalTargetAttributeId;
         }
 
         if ((dataObjectRelationship.name ?? null) !== (payload.name ?? null)) {
@@ -2301,8 +3319,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             targetDataObjectId: payload.targetObjectId,
             type: payload.type,
             relationshipLevel,
-            sourceAttributeId: sourceAttributeId ?? undefined,
-            targetAttributeId: targetAttributeId ?? undefined,
+            sourceAttributeId: globalSourceAttributeId ?? undefined,
+            targetAttributeId: globalTargetAttributeId ?? undefined,
             name: payload.name === undefined ? undefined : payload.name,
             description: payload.description === undefined ? undefined : payload.description,
             metadata: payload.metadata === undefined ? undefined : payload.metadata,
@@ -2310,24 +3328,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      const relationship = await storage.createDataModelObjectRelationship(
-        insertDataModelObjectRelationshipSchema.parse({
-          sourceModelObjectId: sourceModelObject.id,
-          targetModelObjectId: targetModelObject.id,
-          type: payload.type,
-          relationshipLevel,
-          sourceAttributeId: sourceAttributeId ?? undefined,
-          targetAttributeId: targetAttributeId ?? undefined,
-          modelId: payload.modelId,
-          layer: model.layer,
-          name: payload.name === undefined ? undefined : payload.name,
-          description: payload.description === undefined ? undefined : payload.description,
-        }),
-      );
+      const familyRelationships = await synchronizeFamilyRelationships({
+        baseModel: model,
+        sourceObjectId: payload.sourceObjectId,
+        targetObjectId: payload.targetObjectId,
+        type: payload.type,
+        relationshipLevel,
+        sourceAttributeId: globalSourceAttributeId,
+        targetAttributeId: globalTargetAttributeId,
+        name: payload.name ?? null,
+        description: payload.description ?? null,
+      });
+
+      const currentRelationship = familyRelationships.get(model.id);
 
       res.status(201).json({
-        ...relationship,
+        ...(currentRelationship ?? {}),
         dataObjectRelationshipId: dataObjectRelationship?.id ?? null,
+        syncedModelIds: Array.from(familyRelationships.keys()),
       });
     } catch (error) {
       console.error("Failed to create relationship:", error);
@@ -2358,55 +3376,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Related model objects not found" });
       }
 
+      const model = await storage.getDataModel(existing.modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
       const sourceAttributeProvided = Object.prototype.hasOwnProperty.call(req.body, "sourceAttributeId");
       const targetAttributeProvided = Object.prototype.hasOwnProperty.call(req.body, "targetAttributeId");
 
-      const updatedSourceAttribute = sourceAttributeProvided
-        ? payload.sourceAttributeId ?? null
-        : existing.sourceAttributeId ?? null;
-      const updatedTargetAttribute = targetAttributeProvided
-        ? payload.targetAttributeId ?? null
-        : existing.targetAttributeId ?? null;
+      const attributeCache = new Map<number, number | null>();
+      const resolveGlobalAttributeId = async (value: number | null): Promise<number | null> => {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        if (attributeCache.has(value)) {
+          return attributeCache.get(value)!;
+        }
+        const dataModelAttribute = await storage.getDataModelAttribute(value);
+        if (dataModelAttribute) {
+          const globalId = dataModelAttribute.attributeId ?? null;
+          attributeCache.set(value, globalId);
+          return globalId;
+        }
+        attributeCache.set(value, value);
+        return value;
+      };
 
-      const relationshipLevel = determineRelationshipLevel(updatedSourceAttribute, updatedTargetAttribute);
+      const existingSourceAttributeGlobal = await resolveGlobalAttributeId(existing.sourceAttributeId ?? null);
+      const existingTargetAttributeGlobal = await resolveGlobalAttributeId(existing.targetAttributeId ?? null);
 
-      const modelUpdate: Record<string, unknown> = {};
+      const finalSourceAttributeGlobalId = sourceAttributeProvided
+        ? await resolveGlobalAttributeId(payload.sourceAttributeId ?? null)
+        : existingSourceAttributeGlobal;
 
-      if (payload.type && payload.type !== existing.type) {
-        modelUpdate.type = payload.type;
-      }
+      const finalTargetAttributeGlobalId = targetAttributeProvided
+        ? await resolveGlobalAttributeId(payload.targetAttributeId ?? null)
+        : existingTargetAttributeGlobal;
 
-      if (sourceAttributeProvided) {
-        modelUpdate.sourceAttributeId = updatedSourceAttribute;
-      }
-
-      if (targetAttributeProvided) {
-        modelUpdate.targetAttributeId = updatedTargetAttribute;
-      }
-
-      if (Object.prototype.hasOwnProperty.call(req.body, "name")) {
-        modelUpdate.name = payload.name ?? null;
-      }
-
-      if (Object.prototype.hasOwnProperty.call(req.body, "description")) {
-        modelUpdate.description = payload.description ?? null;
-      }
-
-      if (
-        relationshipLevel !== (existing.relationshipLevel === "attribute" ? "attribute" : "object") ||
-        sourceAttributeProvided ||
-        targetAttributeProvided
-      ) {
-        modelUpdate.relationshipLevel = relationshipLevel;
-      }
-
-      let updatedRelationship = existing;
-      if (Object.keys(modelUpdate).length > 0) {
-        updatedRelationship = await storage.updateDataModelObjectRelationship(
-          id,
-          insertDataModelObjectRelationshipSchema.partial().parse(modelUpdate),
-        );
-      }
+      const finalType = payload.type ?? existing.type;
+      const finalRelationshipLevel = determineRelationshipLevel(
+        finalSourceAttributeGlobalId,
+        finalTargetAttributeGlobalId,
+      );
+      const finalName = Object.prototype.hasOwnProperty.call(req.body, "name")
+        ? payload.name ?? null
+        : existing.name ?? null;
+      const finalDescription = Object.prototype.hasOwnProperty.call(req.body, "description")
+        ? payload.description ?? null
+        : existing.description ?? null;
 
       const sourceObjectId = sourceModelObject.objectId;
       const targetObjectId = targetModelObject.objectId;
@@ -2417,40 +3434,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
           possibleGlobalRelationships,
           sourceObjectId,
           targetObjectId,
-          relationshipLevel,
-          updatedSourceAttribute,
-          updatedTargetAttribute,
+          finalRelationshipLevel,
+          finalSourceAttributeGlobalId,
+          finalTargetAttributeGlobalId,
         ) ??
         findMatchingDataObjectRelationship(
           possibleGlobalRelationships,
           sourceObjectId,
           targetObjectId,
           existing.relationshipLevel === "attribute" ? "attribute" : "object",
-          existing.sourceAttributeId ?? null,
-          existing.targetAttributeId ?? null,
+          existingSourceAttributeGlobal,
+          existingTargetAttributeGlobal,
         );
 
       if (dataObjectRelationship) {
         const globalUpdate: Record<string, unknown> = {};
 
-        if (payload.type && payload.type !== dataObjectRelationship.type) {
-          globalUpdate.type = payload.type;
+        if (dataObjectRelationship.type !== finalType) {
+          globalUpdate.type = finalType;
         }
 
         if (sourceAttributeProvided) {
-          globalUpdate.sourceAttributeId = updatedSourceAttribute;
+          globalUpdate.sourceAttributeId = finalSourceAttributeGlobalId;
         }
 
         if (targetAttributeProvided) {
-          globalUpdate.targetAttributeId = updatedTargetAttribute;
+          globalUpdate.targetAttributeId = finalTargetAttributeGlobalId;
         }
 
         if (Object.prototype.hasOwnProperty.call(req.body, "name")) {
-          globalUpdate.name = payload.name ?? null;
+          globalUpdate.name = finalName;
         }
 
         if (Object.prototype.hasOwnProperty.call(req.body, "description")) {
-          globalUpdate.description = payload.description ?? null;
+          globalUpdate.description = finalDescription;
         }
 
         if (Object.prototype.hasOwnProperty.call(req.body, "metadata")) {
@@ -2459,9 +3476,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (
           Object.keys(globalUpdate).length > 0 ||
-          (dataObjectRelationship.relationshipLevel === "attribute" ? "attribute" : "object") !== relationshipLevel
+          (dataObjectRelationship.relationshipLevel === "attribute" ? "attribute" : "object") !== finalRelationshipLevel
         ) {
-          globalUpdate.relationshipLevel = relationshipLevel;
+          globalUpdate.relationshipLevel = finalRelationshipLevel;
           dataObjectRelationship = await storage.updateDataObjectRelationship(
             dataObjectRelationship.id,
             insertDataObjectRelationshipSchema.partial().parse(globalUpdate),
@@ -2472,24 +3489,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           insertDataObjectRelationshipSchema.parse({
             sourceDataObjectId: sourceObjectId,
             targetDataObjectId: targetObjectId,
-            type: payload.type ?? updatedRelationship.type,
-            relationshipLevel,
-            sourceAttributeId: updatedSourceAttribute ?? undefined,
-            targetAttributeId: updatedTargetAttribute ?? undefined,
+            type: finalType,
+            relationshipLevel: finalRelationshipLevel,
+            sourceAttributeId: finalSourceAttributeGlobalId ?? undefined,
+            targetAttributeId: finalTargetAttributeGlobalId ?? undefined,
             name: Object.prototype.hasOwnProperty.call(req.body, "name")
-              ? payload.name
-              : updatedRelationship.name ?? undefined,
+              ? finalName
+              : existing.name ?? undefined,
             description: Object.prototype.hasOwnProperty.call(req.body, "description")
-              ? payload.description
-              : updatedRelationship.description ?? undefined,
+              ? finalDescription
+              : existing.description ?? undefined,
             metadata: payload.metadata === undefined ? undefined : payload.metadata,
           }),
         );
       }
 
+      const familyRelationships = await synchronizeFamilyRelationships({
+        baseModel: model,
+        sourceObjectId,
+        targetObjectId,
+        type: finalType,
+        relationshipLevel: finalRelationshipLevel,
+        sourceAttributeId: finalSourceAttributeGlobalId,
+        targetAttributeId: finalTargetAttributeGlobalId,
+        name: finalName,
+        description: finalDescription,
+      });
+
+      const currentRelationship = familyRelationships.get(model.id);
+
       res.json({
-        ...updatedRelationship,
+        ...(currentRelationship ?? existing),
         dataObjectRelationshipId: dataObjectRelationship?.id ?? null,
+        syncedModelIds: Array.from(familyRelationships.keys()),
       });
     } catch (error) {
       console.error("Failed to update relationship:", error);
@@ -2515,25 +3547,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getDataModelObject(existing.targetModelObjectId),
       ]);
 
-      await storage.deleteDataModelObjectRelationship(id);
+      const model = await storage.getDataModel(existing.modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
 
-      if (sourceModelObject && targetModelObject) {
-        const relationshipLevel = determineRelationshipLevel(
-          existing.sourceAttributeId ?? null,
-          existing.targetAttributeId ?? null,
-        );
+      const attributeCache = new Map<number, number | null>();
+      const resolveGlobalAttributeId = async (value: number | null): Promise<number | null> => {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        if (attributeCache.has(value)) {
+          return attributeCache.get(value)!;
+        }
+        const dataModelAttribute = await storage.getDataModelAttribute(value);
+        if (dataModelAttribute) {
+          const globalId = dataModelAttribute.attributeId ?? null;
+          attributeCache.set(value, globalId);
+          return globalId;
+        }
+        attributeCache.set(value, value);
+        return value;
+      };
 
-        const possibleGlobalRelationships = await storage.getDataObjectRelationshipsByObject(
-          sourceModelObject.objectId,
-        );
+  await storage.deleteDataModelObjectRelationship(id);
+
+  const sourceObjectId = sourceModelObject?.objectId ?? null;
+  const targetObjectId = targetModelObject?.objectId ?? null;
+
+      const sourceAttributeGlobalId = await resolveGlobalAttributeId(existing.sourceAttributeId ?? null);
+      const targetAttributeGlobalId = await resolveGlobalAttributeId(existing.targetAttributeId ?? null);
+      const relationshipLevel = determineRelationshipLevel(sourceAttributeGlobalId, targetAttributeGlobalId);
+
+      if (sourceObjectId !== null && targetObjectId !== null) {
+        await removeFamilyRelationships({
+          baseModel: model,
+          sourceObjectId,
+          targetObjectId,
+          type: existing.type,
+          relationshipLevel,
+          sourceAttributeId: sourceAttributeGlobalId,
+          targetAttributeId: targetAttributeGlobalId,
+          name: existing.name ?? null,
+          description: existing.description ?? null,
+        });
+
+        const possibleGlobalRelationships = await storage.getDataObjectRelationshipsByObject(sourceObjectId);
 
         const dataObjectRelationship = findMatchingDataObjectRelationship(
           possibleGlobalRelationships,
-          sourceModelObject.objectId,
-          targetModelObject.objectId,
+          sourceObjectId,
+          targetObjectId,
           relationshipLevel,
-          existing.sourceAttributeId ?? null,
-          existing.targetAttributeId ?? null,
+          sourceAttributeGlobalId,
+          targetAttributeGlobalId,
         );
 
         if (dataObjectRelationship) {
@@ -2967,16 +4034,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existingObjects = await storage.getDataObjectsByModel(modelId);
       const relevantExisting = new Map<string, DataObject>();
+      const objectRegistry = new Map<string, DataObject>();
       existingObjects.forEach((object) => {
+        const key = object.name.toLowerCase();
+        objectRegistry.set(key, object);
+
         const association: SystemObjectDirection | null = object.sourceSystemId === systemId
           ? "source"
           : object.targetSystemId === systemId
             ? "target"
             : null;
         if (association === direction) {
-          relevantExisting.set(object.name.toLowerCase(), object);
+          relevantExisting.set(key, object);
         }
       });
+
+      const attributeCache = new Map<number, Attribute[]>();
+      const loadAttributesForObject = async (objectId: number): Promise<Attribute[]> => {
+        if (!attributeCache.has(objectId)) {
+          const attrs = await storage.getAttributesByObject(objectId);
+          attributeCache.set(objectId, attrs);
+        }
+        return attributeCache.get(objectId) ?? [];
+      };
 
       const created: DataObject[] = [];
       const updated: DataObject[] = [];
@@ -2984,9 +4064,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       for (const table of metadata) {
         const tableKey = table.name.toLowerCase();
-  const existingObject = relevantExisting.get(tableKey);
+        const existingObject = relevantExisting.get(tableKey);
+        const priorObject = objectRegistry.get(tableKey);
         const metadataPayload: Record<string, any> = {
-          ...(existingObject?.metadata ?? {}),
+          ...(priorObject?.metadata ?? {}),
           syncedFromSystemId: systemId,
           systemDirection: direction,
           rawMetadata: table,
@@ -3003,13 +4084,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isNew: false,
           });
           updated.push(updatedObject);
+          objectRegistry.set(tableKey, updatedObject);
 
           if (includeAttributes && Array.isArray(table.columns)) {
+            attributeCache.delete(updatedObject.id);
             await storage.deleteAttributesByObject(updatedObject.id);
             let attributeCount = 0;
+            const attributesForObject: Attribute[] = [];
             for (let index = 0; index < table.columns.length; index++) {
               const column = table.columns[index];
-              await storage.createAttribute({
+              const attribute = await storage.createAttribute({
                 name: column.name,
                 objectId: updatedObject.id,
                 conceptualType: column.type,
@@ -3020,8 +4104,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 dataType: column.type,
                 orderIndex: index,
               });
+              attributesForObject.push(attribute);
               attributeCount += 1;
             }
+            attributeCache.set(updatedObject.id, attributesForObject);
             attributeSummary[updatedObject.id.toString()] = attributeCount;
           }
         } else {
@@ -3037,12 +4123,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isNew: true,
           });
           created.push(createdObject);
+          objectRegistry.set(tableKey, createdObject);
 
           if (includeAttributes && Array.isArray(table.columns)) {
             let attributeCount = 0;
+            const attributesForObject: Attribute[] = [];
             for (let index = 0; index < table.columns.length; index++) {
               const column = table.columns[index];
-              await storage.createAttribute({
+              const attribute = await storage.createAttribute({
                 name: column.name,
                 objectId: createdObject.id,
                 conceptualType: column.type,
@@ -3053,9 +4141,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 dataType: column.type,
                 orderIndex: index,
               });
+              attributesForObject.push(attribute);
               attributeCount += 1;
             }
+            attributeCache.set(createdObject.id, attributesForObject);
             attributeSummary[createdObject.id.toString()] = attributeCount;
+          }
+        }
+      }
+
+      const existingRelationships = await storage.getDataObjectRelationships();
+      const relationshipRegistry = new Set<string>();
+      existingRelationships.forEach((relationship) => {
+        const normalizedLevel: "object" | "attribute" = relationship.relationshipLevel === "attribute" ? "attribute" : "object";
+        relationshipRegistry.add(
+          buildRelationshipKey(
+            relationship.sourceDataObjectId,
+            relationship.targetDataObjectId,
+            normalizedLevel,
+            relationship.sourceAttributeId ?? null,
+            relationship.targetAttributeId ?? null,
+          ),
+        );
+      });
+
+      let relationshipsCreated = 0;
+      let heuristicRelationshipsCreated = 0;
+
+      for (const table of metadata) {
+        const explicitForeignKeys = Array.isArray(table.foreignKeys) ? table.foreignKeys : [];
+        const heuristicForeignKeys = generateHeuristicForeignKeys(table, metadata, explicitForeignKeys);
+        const candidateForeignKeys = [...explicitForeignKeys, ...heuristicForeignKeys];
+
+        if (candidateForeignKeys.length === 0) {
+          continue;
+        }
+
+        const sourceKey = table.name.toLowerCase();
+        const sourceObject = objectRegistry.get(sourceKey);
+        if (!sourceObject) {
+          continue;
+        }
+
+        const sourceAttributes = await loadAttributesForObject(sourceObject.id);
+
+        for (const fk of candidateForeignKeys) {
+          if (!fk || fk.columns.length !== 1 || fk.referencedColumns.length !== 1) {
+            continue;
+          }
+
+          const normalizedTargetKey = fk.referencedTable.toLowerCase();
+          let targetObject = objectRegistry.get(normalizedTargetKey);
+          if (!targetObject && normalizedTargetKey.includes(".")) {
+            const fallbackKey = normalizedTargetKey.split(".").pop();
+            if (fallbackKey) {
+              targetObject = objectRegistry.get(fallbackKey);
+            }
+          }
+
+          if (!targetObject) {
+            continue;
+          }
+
+          const targetAttributes = await loadAttributesForObject(targetObject.id);
+          const sourceAttribute = sourceAttributes.find((attribute) => attribute.name.toLowerCase() === fk.columns[0].toLowerCase());
+          const targetAttribute = targetAttributes.find((attribute) => attribute.name.toLowerCase() === fk.referencedColumns[0].toLowerCase());
+
+          const relationshipType = fk.relationshipType ?? "N:1";
+          const isHeuristic = fk.constraintName?.startsWith("heuristic_fk_") ?? false;
+          const metadataPayload: Record<string, unknown> = {
+            constraintName: fk.constraintName ?? null,
+            sourceColumn: fk.columns[0],
+            targetColumn: fk.referencedColumns[0],
+            referencedTable: fk.referencedTable,
+            referencedSchema: fk.referencedSchema ?? null,
+            updateRule: fk.updateRule ?? null,
+            deleteRule: fk.deleteRule ?? null,
+            detectionStrategy: isHeuristic ? "heuristic" : "constraint",
+          };
+
+          if (sourceAttribute && targetAttribute) {
+            const directKey = buildRelationshipKey(
+              sourceObject.id,
+              targetObject.id,
+              "attribute",
+              sourceAttribute.id,
+              targetAttribute.id,
+            );
+            const reverseKey = buildRelationshipKey(
+              targetObject.id,
+              sourceObject.id,
+              "attribute",
+              targetAttribute.id,
+              sourceAttribute.id,
+            );
+
+            if (relationshipRegistry.has(directKey) || relationshipRegistry.has(reverseKey)) {
+              continue;
+            }
+
+            await storage.createDataObjectRelationship({
+              sourceDataObjectId: sourceObject.id,
+              targetDataObjectId: targetObject.id,
+              type: relationshipType,
+              relationshipLevel: "attribute",
+              sourceAttributeId: sourceAttribute.id,
+              targetAttributeId: targetAttribute.id,
+              name: fk.constraintName ?? `${sourceObject.name}.${sourceAttribute.name} → ${targetObject.name}.${targetAttribute.name}`,
+              description: "Auto-created from system sync metadata",
+              metadata: metadataPayload,
+            });
+
+            relationshipRegistry.add(directKey);
+            relationshipsCreated += 1;
+            if (isHeuristic) {
+              heuristicRelationshipsCreated += 1;
+            }
+            continue;
+          }
+
+          const objectLevelKey = buildRelationshipKey(
+            sourceObject.id,
+            targetObject.id,
+            "object",
+            null,
+            null,
+          );
+          const reverseObjectKey = buildRelationshipKey(
+            targetObject.id,
+            sourceObject.id,
+            "object",
+            null,
+            null,
+          );
+
+          if (relationshipRegistry.has(objectLevelKey) || relationshipRegistry.has(reverseObjectKey)) {
+            continue;
+          }
+
+          await storage.createDataObjectRelationship({
+            sourceDataObjectId: sourceObject.id,
+            targetDataObjectId: targetObject.id,
+            type: relationshipType,
+            relationshipLevel: "object",
+            sourceAttributeId: null,
+            targetAttributeId: null,
+            name: fk.constraintName ?? `${sourceObject.name} → ${targetObject.name}`,
+            description: "Auto-created from system sync metadata (object-level fallback)",
+            metadata: metadataPayload,
+          });
+
+          relationshipRegistry.add(objectLevelKey);
+          relationshipsCreated += 1;
+          if (isHeuristic) {
+            heuristicRelationshipsCreated += 1;
           }
         }
       }
@@ -3064,6 +4303,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         metadataCount: metadata.length,
         createdCount: created.length,
         updatedCount: updated.length,
+        relationshipsCreated,
+        heuristicRelationshipsCreated,
         created,
         updated,
         attributes: attributeSummary,
@@ -3328,7 +4569,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             attributes: attributes,
             sourceSystem: obj.sourceSystemId,
             targetSystem: obj.targetSystemId,
-            isNew: obj.isNew
+            isNew: obj.isNew,
+            commonProperties: obj.commonProperties ?? null,
+            metadata: obj.metadata ?? null,
           }
         };
       }));
@@ -3356,13 +4599,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return null;
         }
 
+        // Resolve model attribute IDs to global attribute IDs for the UI
+        let globalSourceAttributeId = null;
+        let globalTargetAttributeId = null;
+        
+        if (rel.sourceAttributeId) {
+          const sourceModelAttr = await storage.getDataModelAttribute(rel.sourceAttributeId);
+          globalSourceAttributeId = sourceModelAttr?.attributeId ?? null;
+        }
+        
+        if (rel.targetAttributeId) {
+          const targetModelAttr = await storage.getDataModelAttribute(rel.targetAttributeId);
+          globalTargetAttributeId = targetModelAttr?.attributeId ?? null;
+        }
+
         const relationshipLevel = rel.relationshipLevel === "attribute" ? "attribute" : "object";
         const key = buildRelationshipKey(
           sourceModelObject.objectId,
           targetModelObject.objectId,
           relationshipLevel,
-          rel.sourceAttributeId ?? null,
-          rel.targetAttributeId ?? null,
+          globalSourceAttributeId,
+          globalTargetAttributeId,
         );
 
         const dataObjectRelationshipId = globalRelationshipMap.get(key)?.id ?? null;
@@ -3376,8 +4633,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           data: {
             relationshipId: rel.id,
             relationshipType: rel.type,
-            sourceAttributeId: rel.sourceAttributeId,
-            targetAttributeId: rel.targetAttributeId,
+            sourceAttributeId: globalSourceAttributeId,
+            targetAttributeId: globalTargetAttributeId,
             dataObjectRelationshipId,
           }
         };
@@ -3487,10 +4744,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lastUpdatedLayer: layerKey
         } as Record<string, any>;
 
-        return storage.updateDataModelObject(modelObject.id, { 
+        const result = await storage.updateDataModelObject(modelObject.id, { 
           layerSpecificConfig: updatedConfig,
           position
         });
+
+        if (layerKey === "conceptual") {
+          await storage.updateDataObject(modelObject.objectId, {
+            position,
+          });
+        }
+
+        return result;
       });
       
       await Promise.all(updates);

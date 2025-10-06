@@ -18,12 +18,24 @@ export interface ADLSConnectionConfig {
   accessKey?: string;
 }
 
+export interface ForeignKeyMetadata {
+  constraintName: string;
+  columns: string[];
+  referencedTable: string;
+  referencedSchema?: string;
+  referencedColumns: string[];
+  updateRule?: string;
+  deleteRule?: string;
+  relationshipType?: "1:1" | "1:N" | "N:1" | "N:M" | "M:N";
+}
+
 export interface TableMetadata {
   name: string;
   schema?: string;
   originalName?: string;
   columns: ColumnMetadata[];
   rowCount?: number;
+  foreignKeys?: ForeignKeyMetadata[];
 }
 
 export interface ColumnMetadata {
@@ -141,17 +153,94 @@ export class DataConnectors {
           length: col.character_maximum_length ? Number(col.character_maximum_length) : undefined,
         }));
 
+        const foreignKeysRes = await client.query(
+          `SELECT
+             tc.constraint_name,
+             kcu.column_name,
+             ccu.table_schema AS foreign_table_schema,
+             ccu.table_name AS foreign_table_name,
+             ccu.column_name AS foreign_column_name,
+             rc.update_rule,
+             rc.delete_rule,
+             kcu.ordinal_position
+           FROM information_schema.table_constraints AS tc
+           JOIN information_schema.key_column_usage AS kcu
+             ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+           JOIN information_schema.constraint_column_usage AS ccu
+             ON ccu.constraint_name = tc.constraint_name
+             AND ccu.table_schema = tc.table_schema
+           JOIN information_schema.referential_constraints AS rc
+             ON rc.constraint_name = tc.constraint_name
+             AND rc.constraint_schema = tc.table_schema
+           WHERE tc.constraint_type = 'FOREIGN KEY'
+             AND tc.table_schema = $1
+             AND tc.table_name = $2
+           ORDER BY tc.constraint_name, kcu.ordinal_position`,
+          [schemaName, tableName]
+        );
+
+        type ForeignKeyAccumulator = {
+          constraintName: string;
+          columns: string[];
+          referencedSchema?: string;
+          referencedTable: string;
+          referencedColumns: string[];
+          updateRule?: string;
+          deleteRule?: string;
+        };
+
+        const foreignKeyMap = new Map<string, ForeignKeyAccumulator>();
+
+        for (const row of foreignKeysRes.rows) {
+          const constraintName = row.constraint_name as string;
+          let accumulator = foreignKeyMap.get(constraintName);
+          if (!accumulator) {
+            accumulator = {
+              constraintName,
+              columns: [],
+              referencedSchema: row.foreign_table_schema as string | undefined,
+              referencedTable: row.foreign_table_name as string,
+              referencedColumns: [],
+              updateRule: row.update_rule as string | undefined,
+              deleteRule: row.delete_rule as string | undefined,
+            };
+            foreignKeyMap.set(constraintName, accumulator);
+          }
+
+          accumulator.columns.push(row.column_name as string);
+          accumulator.referencedColumns.push(row.foreign_column_name as string);
+        }
+
+        const foreignKeys = Array.from(foreignKeyMap.values()).map((fk) => {
+          const referencedSchema = fk.referencedSchema ?? undefined;
+          const referencedDisplayName = referencedSchema && referencedSchema !== schemaName && referencedSchema !== "public"
+            ? `${referencedSchema}.${fk.referencedTable}`
+            : fk.referencedTable;
+          return {
+            constraintName: fk.constraintName,
+            columns: fk.columns,
+            referencedSchema,
+            referencedTable: referencedDisplayName,
+            referencedColumns: fk.referencedColumns,
+            updateRule: fk.updateRule,
+            deleteRule: fk.deleteRule,
+            relationshipType: fk.columns.length === 1 ? "N:1" : undefined,
+          } satisfies ForeignKeyMetadata;
+        });
+
         const displayName = schemaName && schemaName !== "public"
           ? `${schemaName}.${tableName}`
           : tableName;
 
-          tables.push({
-            name: displayName,
-            schema: schemaName,
-            originalName: tableName,
-            columns,
-            rowCount,
-          });
+        tables.push({
+          name: displayName,
+          schema: schemaName,
+          originalName: tableName,
+          columns,
+          rowCount,
+          foreignKeys,
+        });
         }
 
         return tables;
@@ -169,7 +258,6 @@ export class DataConnectors {
       const mysql = await import('mysql2/promise');
       const connection = await mysql.createConnection({
         host: config.host,
-        port: config.port,
         database: config.database,
         user: config.username,
         password: config.password,
@@ -177,13 +265,14 @@ export class DataConnectors {
 
       // Get tables
       const [tablesRows] = await connection.query(
-        `SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'`,
+        `SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = ? AND table_type = 'BASE TABLE'`,
         [config.database]
       );
 
       const tables: TableMetadata[] = [];
       for (const row of tablesRows as any[]) {
         const tableName = row.TABLE_NAME;
+        const schemaName = row.TABLE_SCHEMA as string | undefined;
 
         // Get columns
         const [columnsRows] = await connection.query(
@@ -208,10 +297,85 @@ export class DataConnectors {
           length: col.CHARACTER_MAXIMUM_LENGTH ? Number(col.CHARACTER_MAXIMUM_LENGTH) : undefined,
         }));
 
+        const [foreignKeysRows] = await connection.query(
+          `SELECT
+             rc.CONSTRAINT_NAME AS constraint_name,
+             kcu.COLUMN_NAME AS column_name,
+             rc.REFERENCED_TABLE_SCHEMA AS referenced_table_schema,
+             rc.REFERENCED_TABLE_NAME AS referenced_table_name,
+             kcu.REFERENCED_COLUMN_NAME AS referenced_column_name,
+             rc.UPDATE_RULE,
+             rc.DELETE_RULE,
+             kcu.ORDINAL_POSITION AS ordinal_position
+           FROM information_schema.referential_constraints rc
+           JOIN information_schema.key_column_usage kcu
+             ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+            AND rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA
+           WHERE kcu.TABLE_SCHEMA = ?
+             AND kcu.TABLE_NAME = ?
+           ORDER BY rc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION`,
+          [config.database, tableName]
+        );
+
+        type ForeignKeyAccumulator = {
+          constraintName: string;
+          columns: string[];
+          referencedSchema?: string;
+          referencedTable: string;
+          referencedColumns: string[];
+          updateRule?: string;
+          deleteRule?: string;
+        };
+
+        const foreignKeyMap = new Map<string, ForeignKeyAccumulator>();
+        for (const fkRow of foreignKeysRows as any[]) {
+          const constraintName = fkRow.constraint_name as string;
+          let accumulator = foreignKeyMap.get(constraintName);
+          if (!accumulator) {
+            accumulator = {
+              constraintName,
+              columns: [],
+              referencedSchema: fkRow.referenced_table_schema as string | undefined,
+              referencedTable: fkRow.referenced_table_name as string,
+              referencedColumns: [],
+              updateRule: fkRow.UPDATE_RULE as string | undefined,
+              deleteRule: fkRow.DELETE_RULE as string | undefined,
+            };
+            foreignKeyMap.set(constraintName, accumulator);
+          }
+
+          accumulator.columns.push(fkRow.column_name as string);
+          accumulator.referencedColumns.push(fkRow.referenced_column_name as string);
+        }
+
+        const foreignKeys = Array.from(foreignKeyMap.values()).map((fk) => {
+          const referencedSchema = fk.referencedSchema ?? undefined;
+          const referencedDisplay = referencedSchema && referencedSchema !== schemaName
+            ? `${referencedSchema}.${fk.referencedTable}`
+            : fk.referencedTable;
+          return {
+            constraintName: fk.constraintName,
+            columns: fk.columns,
+            referencedSchema,
+            referencedTable: referencedDisplay,
+            referencedColumns: fk.referencedColumns,
+            updateRule: fk.updateRule,
+            deleteRule: fk.deleteRule,
+            relationshipType: fk.columns.length === 1 ? "N:1" : undefined,
+          } satisfies ForeignKeyMetadata;
+        });
+
+        const displayName = schemaName && schemaName !== config.database
+          ? `${schemaName}.${tableName}`
+          : tableName;
+
         tables.push({
-          name: tableName,
+          name: displayName,
+          schema: schemaName,
+          originalName: tableName,
           columns,
           rowCount,
+          foreignKeys,
         });
       }
 
@@ -232,7 +396,7 @@ export class DataConnectors {
       });
 
       const tablesRes = await pool.request().query(`
-        SELECT TABLE_NAME
+        SELECT TABLE_SCHEMA, TABLE_NAME
         FROM INFORMATION_SCHEMA.TABLES
         WHERE TABLE_TYPE = 'BASE TABLE'
       `);
@@ -240,13 +404,14 @@ export class DataConnectors {
       const tables: TableMetadata[] = [];
       for (const row of tablesRes.recordset) {
         const tableName = row.TABLE_NAME;
+        const schemaName = row.TABLE_SCHEMA as string | undefined;
 
         // Get columns
         const columnsRes = await pool.request().query(`
           SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
           FROM INFORMATION_SCHEMA.COLUMNS
-          WHERE TABLE_NAME = @tableName
-        `).input('tableName', mssql.VarChar, tableName);
+          WHERE TABLE_NAME = @tableName AND (@tableSchema IS NULL OR TABLE_SCHEMA = @tableSchema)
+        `).input('tableName', mssql.VarChar, tableName).input('tableSchema', mssql.VarChar, schemaName ?? null);
 
         // Get primary keys
         const pkRes = await pool.request().query(`
@@ -254,7 +419,8 @@ export class DataConnectors {
           FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
           WHERE OBJECTPROPERTY(OBJECT_ID(CONSTRAINT_SCHEMA + '.' + CONSTRAINT_NAME), 'IsPrimaryKey') = 1
             AND TABLE_NAME = @tableName
-        `).input('tableName', mssql.VarChar, tableName);
+            AND (@tableSchema IS NULL OR TABLE_SCHEMA = @tableSchema)
+        `).input('tableName', mssql.VarChar, tableName).input('tableSchema', mssql.VarChar, schemaName ?? null);
 
         const pkCols = pkRes.recordset.map((r: any) => r.COLUMN_NAME);
 
@@ -273,10 +439,93 @@ export class DataConnectors {
           length: col.CHARACTER_MAXIMUM_LENGTH ? Number(col.CHARACTER_MAXIMUM_LENGTH) : undefined,
         }));
 
+        const fkQuery = pool.request()
+          .input('tableName', mssql.VarChar, tableName)
+          .input('tableSchema', mssql.VarChar, schemaName ?? null)
+          .query(`
+            SELECT
+              fk.name AS constraint_name,
+              parent_col.name AS column_name,
+              referenced_schema.name AS referenced_schema,
+              referenced_tab.name AS referenced_table,
+              referenced_col.name AS referenced_column_name,
+              fk.delete_referential_action_desc AS delete_rule,
+              fk.update_referential_action_desc AS update_rule,
+              fk_cols.constraint_column_id AS ordinal_position
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fk_cols ON fk.object_id = fk_cols.constraint_object_id
+            JOIN sys.tables parent_tab ON fk.parent_object_id = parent_tab.object_id
+            JOIN sys.schemas parent_schema ON parent_tab.schema_id = parent_schema.schema_id
+            JOIN sys.columns parent_col ON fk_cols.parent_column_id = parent_col.column_id AND fk_cols.parent_object_id = parent_col.object_id
+            JOIN sys.tables referenced_tab ON fk.referenced_object_id = referenced_tab.object_id
+            JOIN sys.schemas referenced_schema ON referenced_tab.schema_id = referenced_schema.schema_id
+            JOIN sys.columns referenced_col ON fk_cols.referenced_column_id = referenced_col.column_id AND fk_cols.referenced_object_id = referenced_col.object_id
+            WHERE parent_tab.name = @tableName
+              AND (@tableSchema IS NULL OR parent_schema.name = @tableSchema)
+            ORDER BY fk.name, fk_cols.constraint_column_id
+          `);
+
+        const fkRes = await fkQuery;
+
+        type ForeignKeyAccumulator = {
+          constraintName: string;
+          columns: string[];
+          referencedSchema?: string;
+          referencedTable: string;
+          referencedColumns: string[];
+          updateRule?: string;
+          deleteRule?: string;
+        };
+
+        const foreignKeyMap = new Map<string, ForeignKeyAccumulator>();
+        for (const fkRow of fkRes.recordset) {
+          const constraintName = fkRow.constraint_name as string;
+          let accumulator = foreignKeyMap.get(constraintName);
+          if (!accumulator) {
+            accumulator = {
+              constraintName,
+              columns: [],
+              referencedSchema: fkRow.referenced_schema as string | undefined,
+              referencedTable: fkRow.referenced_table as string,
+              referencedColumns: [],
+              updateRule: fkRow.update_rule as string | undefined,
+              deleteRule: fkRow.delete_rule as string | undefined,
+            };
+            foreignKeyMap.set(constraintName, accumulator);
+          }
+
+          accumulator.columns.push(fkRow.column_name as string);
+          accumulator.referencedColumns.push(fkRow.referenced_column_name as string);
+        }
+
+        const foreignKeys = Array.from(foreignKeyMap.values()).map((fk) => {
+          const referencedSchema = fk.referencedSchema ?? undefined;
+          const referencedDisplay = referencedSchema && referencedSchema !== schemaName
+            ? `${referencedSchema}.${fk.referencedTable}`
+            : fk.referencedTable;
+          return {
+            constraintName: fk.constraintName,
+            columns: fk.columns,
+            referencedSchema,
+            referencedTable: referencedDisplay,
+            referencedColumns: fk.referencedColumns,
+            updateRule: fk.updateRule,
+            deleteRule: fk.deleteRule,
+            relationshipType: fk.columns.length === 1 ? "N:1" : undefined,
+          } satisfies ForeignKeyMetadata;
+        });
+
+        const displayName = schemaName && schemaName !== "dbo"
+          ? `${schemaName}.${tableName}`
+          : tableName;
+
         tables.push({
-          name: tableName,
+          name: displayName,
+          schema: schemaName,
+          originalName: tableName,
           columns,
           rowCount,
+          foreignKeys,
         });
       }
 

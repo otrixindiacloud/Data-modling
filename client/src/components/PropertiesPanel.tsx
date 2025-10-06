@@ -259,9 +259,23 @@ export default function PropertiesPanel() {
 
   // Load common properties from database when node is selected
   useEffect(() => {
-    // Set empty properties for now since commonProperties is not on the data type
-    setCustomProperties([]);
-  }, [validSelectedNode]);
+    if (validSelectedNode?.data?.commonProperties && typeof validSelectedNode.data.commonProperties === "object") {
+      const parsed = Object.entries(validSelectedNode.data.commonProperties as Record<string, any>).map(
+        ([key, rawValue]) => {
+          const valueObj = (rawValue ?? {}) as { value?: string; type?: CustomProperty["type"] };
+          return {
+            id: `${key}`,
+            key,
+            value: String(valueObj.value ?? ""),
+            type: (valueObj.type as CustomProperty["type"]) ?? "text",
+          } as CustomProperty;
+        },
+      );
+      setCustomProperties(parsed);
+    } else {
+      setCustomProperties([]);
+    }
+  }, [validSelectedNode?.data?.commonProperties, validSelectedNode?.id]);
 
   // Load domains
   const { data: allDomains = [] } = useQuery({

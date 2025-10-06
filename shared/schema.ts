@@ -66,8 +66,8 @@ export const dataModelObjects = pgTable("data_model_objects", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// Attributes (Columns/Fields) - Attributes with object associations (current DB structure)
-export const attributes = pgTable("attributes", {
+// Data Object Attributes (Columns/Fields) - Attributes with object associations
+export const attributes = pgTable("data_object_attributes", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   objectId: integer("object_id").references(() => dataObjects.id).notNull(), // Current DB has this

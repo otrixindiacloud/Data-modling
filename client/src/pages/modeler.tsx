@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useModelerStore } from "@/store/modelerStore";
 import TopNavBar from "@/components/TopNavBar";
@@ -18,6 +18,7 @@ import ImprovedModelPicker from "@/components/ImprovedModelPicker";
 import { Badge } from "@/components/ui/badge";
 import { useRoute } from "wouter";
 import type { DataModel } from "@shared/schema";
+import type { ModelLayer } from "@/types/modeler";
 
 const modelSharesRoot = (
   model: DataModel | null,
@@ -108,6 +109,43 @@ export default function ModelerPage() {
       (model.parentModelId === null || model.parentModelId === undefined)
     );
   }, [models]);
+
+  const hasAppliedPendingLayer = useRef(false);
+
+  useEffect(() => {
+    if (hasAppliedPendingLayer.current) return;
+    if (typeof window === "undefined") return;
+    if (!Array.isArray(models) || models.length === 0) return;
+
+    const pendingLayer = window.sessionStorage.getItem("modeler:pendingLayer") as ModelLayer | null;
+    if (!pendingLayer) {
+      hasAppliedPendingLayer.current = true;
+      return;
+    }
+
+    const validLayers: ModelLayer[] = ["conceptual", "logical", "physical"];
+    if (!validLayers.includes(pendingLayer)) {
+      window.sessionStorage.removeItem("modeler:pendingLayer");
+      window.sessionStorage.removeItem("modeler:pendingModelId");
+      hasAppliedPendingLayer.current = true;
+      return;
+    }
+
+    const pendingModelId = window.sessionStorage.getItem("modeler:pendingModelId");
+    window.sessionStorage.removeItem("modeler:pendingLayer");
+    window.sessionStorage.removeItem("modeler:pendingModelId");
+
+    const typedModels = models as DataModel[];
+    const targetModel = pendingModelId ? typedModels.find((model) => model.id === Number(pendingModelId)) ?? null : null;
+
+    if (targetModel) {
+      setCurrentModel(targetModel);
+    }
+
+    setCurrentLayer(pendingLayer);
+
+    hasAppliedPendingLayer.current = true;
+  }, [models, setCurrentLayer, setCurrentModel]);
 
   useEffect(() => {
     if (!matchModelRoute || !routeParams?.modelId || !Array.isArray(models) || models.length === 0) {
@@ -286,9 +324,9 @@ export default function ModelerPage() {
               defaultSize={dataExplorerCollapsed ? 4 : widths.dataExplorer} 
               minSize={dataExplorerCollapsed ? 4 : 15} 
               maxSize={dataExplorerCollapsed ? 6 : 40}
-              className="flex min-h-0"
+              className="flex min-h-0 h-full max-h-screen"
             >
-              <div className="flex-1 min-h-0 flex">
+              <div className="flex-1 min-h-0 flex h-full max-h-screen">
                 <DataObjectExplorer 
                   isCollapsed={dataExplorerCollapsed}
                   onToggleCollapse={handleToggleDataExplorer}
