@@ -424,14 +424,8 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
   if (!selectedObjectId || !selectedObject) {
     return (
       <div className="h-full max-h-screen flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-border bg-card">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-foreground flex items-center">
-                <Settings className="h-4 w-4 mr-2" />
-                Properties
-              </h2>
-              <Button
+        <div className="p-3 border-b border-border bg-card">
+          <Button
                 size="sm"
                 className="h-7 text-xs"
                 onClick={handleAddDataObject}
@@ -439,7 +433,15 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
               >
                 <Plus className="h-3 w-3 mr-1" />
                 Add Data Object
-              </Button>
+            </Button>
+        </div>
+        <div className="p-4 border-b border-border bg-card">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground flex items-center">
+                <Settings className="h-4 w-4 mr-2" />
+                Properties 3
+              </h2>
             </div>
             {onClose && (
               <Button
@@ -475,17 +477,8 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-foreground flex items-center">
               <Settings className="h-4 w-4 mr-2" />
-              Properties
+              Properties 2
             </h2>
-            <Button
-              size="sm"
-              className="h-7 text-xs"
-              onClick={handleAddDataObject}
-              data-testid="button-add-data-object"
-            >
-              <Plus className="h-3 w-3 mr-1" />
-              Add Data Object
-            </Button>
           </div>
           <div className="flex items-center gap-1">
             {onToggleCollapse && (

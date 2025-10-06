@@ -74,6 +74,8 @@ const nodeTypes: NodeTypes = {
 };
 
 function CanvasComponent() {
+  console.log('🎨 CanvasComponent MOUNTED/RENDERED');
+  
   // Initialize touch performance optimizations
   useTouchPerformance();
   const deviceCapabilities = useDeviceCapabilities();
@@ -191,6 +193,7 @@ function CanvasComponent() {
   // Mutation for saving node positions with enhanced error handling
   const savePositionsMutation = useMutation({
     mutationFn: async ({ positions, modelId, layer }: SavePositionsPayload) => {
+      console.log('🚀 savePositionsMutation called:', { positions, modelId, layer });
       setSaveStatus('saving');
 
       const response = await fetch(`/api/models/${modelId}/canvas/positions`, {
@@ -204,14 +207,20 @@ function CanvasComponent() {
         }),
       });
 
+      console.log('📡 Server response:', { status: response.status, ok: response.ok });
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('❌ Save failed:', errorText);
         throw new Error(`Failed to save positions: ${response.status} ${errorText}`);
       }
 
-      return response.json();
+      const result = await response.json();
+      console.log('✅ Save successful:', result);
+      return result;
     },
     onSuccess: (_, variables) => {
+      console.log('✨ onSuccess called');
       setSaveStatus('saved');
       // Clear saved status after 2 seconds
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -222,6 +231,7 @@ function CanvasComponent() {
       });
     },
     onError: (error) => {
+      console.error('💥 onError called:', error);
       console.error('Failed to save positions:', error);
       setSaveStatus('error');
       // Clear error status after 5 seconds
@@ -239,6 +249,8 @@ function CanvasComponent() {
       sourceAttributeId?: number;
       targetAttributeId?: number;
     }) => {
+      setSaveStatus('saving'); // Show saving indicator
+      
       const response = await fetch('/api/relationships', {
         method: 'POST',
         headers: {
@@ -255,6 +267,9 @@ function CanvasComponent() {
       return response.json();
     },
     onSuccess: () => {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000); // Clear after 2 seconds
+      
       // Invalidate and refetch canvas data to ensure consistency
       queryClient.invalidateQueries({
         queryKey: ["/api/models", currentLayerModel?.id, "canvas", currentLayer]
@@ -345,7 +360,19 @@ function CanvasComponent() {
   // Update local state when canvas data loads and manage history properly
   useEffect(() => {
     if (canvasData && canvasData.nodes && canvasData.edges) {
-      console.log('Loading canvas data:', canvasData.nodes.length, 'nodes,', canvasData.edges.length, 'edges');
+      console.log('📥 Loading canvas data:', canvasData.nodes.length, 'nodes,', canvasData.edges.length, 'edges');
+      
+      // DEBUG: Check if nodes have modelObjectId
+      canvasData.nodes.forEach((node: any, index: number) => {
+        console.log(`🔍 Node ${index}:`, {
+          id: node.id,
+          name: node.data?.name,
+          modelObjectId: node.data?.modelObjectId,
+          objectId: node.data?.objectId,
+          position: node.position
+        });
+      });
+      
       setIsDataLoading(true);
       
       // Clear history first to prevent conflicts with new data
@@ -507,6 +534,10 @@ function CanvasComponent() {
               currentLayerModel: currentLayerModel?.id,
               currentLayer
             });
+            
+            // Show saving indicator
+            setSaveStatus('saving');
+            
             fetch(`/api/models/${targetModelId}/objects`, {
               method: 'POST',
               headers: {
@@ -544,6 +575,22 @@ function CanvasComponent() {
               return response.json();
             })
             .then((result) => {
+              // Update node with modelObjectId from server response
+              const nodeWithModelObjectId = {
+                ...newNode,
+                data: {
+                  ...newNode.data,
+                  modelObjectId: result?.id || result?.modelObjectId // Get the data_model_object.id
+                }
+              };
+              
+              // Add to local state with updated modelObjectId for immediate interaction
+              setNodes((nds) => [...nds, nodeWithModelObjectId]);
+              
+              // Show saved status
+              setSaveStatus('saved');
+              setTimeout(() => setSaveStatus('idle'), 2000);
+              
               // Invalidate canvas query to refresh data
               queryClient.invalidateQueries({
                 queryKey: ["/api/models", targetModelId, "canvas", currentLayer]
@@ -574,6 +621,10 @@ function CanvasComponent() {
               }
             })
             .catch(error => {
+              // Show error status
+              setSaveStatus('error');
+              setTimeout(() => setSaveStatus('idle'), 5000);
+              
               console.error('Failed to save object to database:', error);
               console.error('Error details:', {
                 objectId: object.id,
@@ -657,8 +708,11 @@ function CanvasComponent() {
           // Save to database
           const targetModelId = currentLayerModel?.id || currentModel?.id;
           if (targetModelId) {
-            const savePromises = newNodes.map((node: any) => 
-              fetch(`/api/models/${targetModelId}/objects`, {
+            // Show saving indicator
+            setSaveStatus('saving');
+            
+            const savePromises = newNodes.map(async (node: any) => {
+              const response = await fetch(`/api/models/${targetModelId}/objects`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -673,15 +727,47 @@ function CanvasComponent() {
                     layer: currentLayer
                   }
                 }),
-              })
-            );
+              });
+              
+              // Return both response and node for later processing
+              return { response, nodeId: node.id };
+            });
 
             Promise.all(savePromises)
-            .then(responses => {
-              const failedSaves = responses.filter(res => !res.ok);
+            .then(async (results) => {
+              const failedSaves = results.filter(r => !r.response.ok);
               if (failedSaves.length > 0) {
                 throw new Error(`Failed to save ${failedSaves.length} objects`);
               }
+              
+              // Parse all responses to get modelObjectIds
+              const parsedResults = await Promise.all(
+                results.map(async (r) => ({
+                  nodeId: r.nodeId,
+                  data: await r.response.json()
+                }))
+              );
+              
+              // Update nodes with modelObjectIds from server
+              setNodes((nds) => 
+                nds.map((node) => {
+                  const result = parsedResults.find((r) => r.nodeId === node.id);
+                  if (result) {
+                    return {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        modelObjectId: result.data?.id || result.data?.modelObjectId
+                      }
+                    };
+                  }
+                  return node;
+                })
+              );
+              
+              // Show saved status
+              setSaveStatus('saved');
+              setTimeout(() => setSaveStatus('idle'), 2000);
               
               // Invalidate canvas query to refresh data
               queryClient.invalidateQueries({
@@ -698,6 +784,10 @@ function CanvasComponent() {
               });
             })
             .catch(error => {
+              // Show error status
+              setSaveStatus('error');
+              setTimeout(() => setSaveStatus('idle'), 5000);
+              
               console.error('Failed to save objects to database:', error);
               // Remove failed objects from local state
               const failedNodeIds = newNodes.map((n: any) => n.id);
@@ -749,16 +839,43 @@ function CanvasComponent() {
   const savePositionsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const handleNodesChange = useCallback((changes: any[]) => {
+    console.log('🚨 handleNodesChange CALLED - TOP OF FUNCTION');
+    console.log('   Changes:', changes.length, 'Total');
+    console.log('   First change:', changes[0] ? { type: changes[0].type, id: changes[0].id, dragging: changes[0].dragging } : 'none');
+    
     // Apply changes to local state first
     onNodesChange(changes);
     
+    // DEBUG: Log all changes
+    console.log('🔄 handleNodesChange called:', {
+      changesCount: changes.length,
+      changes: changes.map(c => ({ type: c.type, id: c.id, dragging: c.dragging, hasPosition: !!c.position })),
+      currentModelId: currentModel?.id,
+      isDataLoading
+    });
+    
     // Check if any position changes occurred (when dragging is complete)
-    const positionChanges = changes.filter(change => 
-      change.type === 'position' && 
-      change.position && 
-      !change.dragging && // Only save when dragging is complete
-      change.id // Ensure we have a valid node ID
-    );
+    const positionChanges = changes.filter(change => {
+      const isPositionChange = change.type === 'position' && !change.dragging;
+      
+      if (change.type === 'position') {
+        console.log('   🔍 Position change details:', {
+          id: change.id,
+          type: change.type,
+          dragging: change.dragging,
+          hasPosition: !!change.position,
+          position: change.position,
+          fullChange: change
+        });
+      }
+      
+      return isPositionChange;
+    });
+    
+    console.log('📍 Position changes detected:', {
+      count: positionChanges.length,
+      changes: positionChanges.map(c => ({ id: c.id, position: c.position }))
+    });
     
     // Track history for position changes when dragging is complete
     if (positionChanges.length > 0 && currentModel?.id && !isDataLoading) {
@@ -778,14 +895,23 @@ function CanvasComponent() {
     }
     
     if (positionChanges.length > 0 && currentModel?.id) {
+      console.log('💾 AUTO-SAVE: Starting position save process');
+      
+      // AUTO-SAVE: Show saving indicator immediately when dragging ends
+      setSaveStatus('saving');
+      
       // Clear existing timeout to debounce multiple rapid changes
       if (savePositionsTimeoutRef.current) {
+        console.log('⏱️ Clearing existing timeout');
         clearTimeout(savePositionsTimeoutRef.current);
       }
       
-      // Debounce position saving to avoid excessive API calls
+      // Debounce position saving to avoid excessive API calls (reduced from 500ms to 300ms for faster response)
       savePositionsTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ Timeout fired, starting save...');
         setNodes(currentNodes => {
+          console.log('📦 Current nodes count:', currentNodes.length);
+          
           // Filter out nodes without identifiers and ensure data integrity
           const validNodes = currentNodes.filter(node => {
             const data = node.data || {};
@@ -793,7 +919,7 @@ function CanvasComponent() {
             const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
             const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
 
-            return (
+            const isValid = (
               hasIdentifier &&
               node.position &&
               typeof node.position.x === 'number' &&
@@ -801,9 +927,27 @@ function CanvasComponent() {
               !isNaN(node.position.x) &&
               !isNaN(node.position.y)
             );
+            
+            if (!isValid && node.id) {
+              console.warn('⚠️ Invalid node filtered out:', {
+                id: node.id,
+                name: node.data?.name,
+                hasIdentifier,
+                modelObjectId,
+                objectId,
+                position: node.position
+              });
+            }
+            
+            return isValid;
           });
           
-          if (validNodes.length === 0) return currentNodes;
+          console.log('✅ Valid nodes for save:', validNodes.length);
+          
+          if (validNodes.length === 0) {
+            console.warn('❌ No valid nodes to save!');
+            return currentNodes;
+          }
           
           const positions = validNodes.map(node => {
             const data = node.data || {};
@@ -826,10 +970,23 @@ function CanvasComponent() {
               payload.objectId = data.objectId;
             }
 
+            console.log('📍 Position payload for node:', {
+              nodeId: node.id,
+              nodeName: node.data?.name,
+              payload
+            });
+
             return payload;
           });
           
           const targetModelId = currentLayerModel?.id || currentModel?.id;
+
+          console.log('🎯 Saving positions:', {
+            positionsCount: positions.length,
+            targetModelId,
+            layer: currentLayer,
+            positions
+          });
 
           // Only save if we have valid positions and current layer model exists
           if (positions.length > 0 && targetModelId) {
@@ -838,22 +995,30 @@ function CanvasComponent() {
               modelId: targetModelId,
               layer: currentLayer,
             });
+          } else {
+            console.error('❌ Cannot save - missing requirements:', {
+              positionsCount: positions.length,
+              targetModelId,
+              layer: currentLayer
+            });
           }
           
           return currentNodes;
         });
-      }, 500); // Save after 500ms of no changes
+      }, 300); // Save after 300ms of no changes (reduced for faster auto-save)
     }
   }, [
     onNodesChange,
-    savePositionsMutation,
     currentModel?.id,
     currentLayerModel?.id,
     currentLayer,
     saveToHistory,
+    setNodes,
     setEdges,
     isDataLoading,
-    history.length
+    history.length,
+    savePositionsMutation.mutate,
+    setSaveStatus
   ]);
 
   // Cleanup timeout on unmount and force save if needed
@@ -1558,6 +1723,10 @@ function CanvasComponent() {
             currentLayerModel: currentLayerModel?.id,
             currentLayer
           });
+          
+          // Show saving indicator
+          setSaveStatus('saving');
+          
           fetch(`/api/models/${targetModelId}/objects`, {
             method: 'POST',
             headers: {
@@ -1595,8 +1764,21 @@ function CanvasComponent() {
             return response.json();
           })
             .then((result) => {
-              // Add to local state only after successful database operation
-              setNodes((nds) => [...nds, newNode]);
+              // Update node with modelObjectId from server response
+              const nodeWithModelObjectId = {
+                ...newNode,
+                data: {
+                  ...newNode.data,
+                  modelObjectId: result?.id || result?.modelObjectId // Get the data_model_object.id
+                }
+              };
+              
+              // Add to local state with updated modelObjectId
+              setNodes((nds) => [...nds, nodeWithModelObjectId]);
+              
+              // Show saved status
+              setSaveStatus('saved');
+              setTimeout(() => setSaveStatus('idle'), 2000);
               
               // Invalidate canvas query to refresh data
               queryClient.invalidateQueries({
@@ -1635,6 +1817,11 @@ function CanvasComponent() {
               currentLayerModel: currentLayerModel?.id,
               currentLayer
             });
+            
+            // Show error status
+            setSaveStatus('error');
+            setTimeout(() => setSaveStatus('idle'), 5000);
+            
             // Remove from local state if database save failed
             setNodes((nds) => nds.filter(n => n.id !== newNode.id));
             toast({
@@ -1711,11 +1898,14 @@ function CanvasComponent() {
         // Save each object to database
         const targetModelId = currentLayerModel?.id || currentModel?.id;
         if (targetModelId) {
+          // Show saving indicator
+          setSaveStatus('saving');
+          
           Promise.all(nodesToAdd.map(async (node: any) => {
             const objectId = node.data.objectId;
             const position = node.position;
             
-            return fetch(`/api/models/${targetModelId}/objects`, {
+            const response = await fetch(`/api/models/${targetModelId}/objects`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1731,13 +1921,45 @@ function CanvasComponent() {
                   }
                 }),
             });
+            
+            // Return both response and node for later processing
+            return { response, nodeId: node.id };
           }))
-          .then(responses => {
+          .then(async (results) => {
             // Check if all requests were successful
-            const failedRequests = responses.filter(response => !response.ok);
+            const failedRequests = results.filter(r => !r.response.ok);
             if (failedRequests.length > 0) {
               throw new Error(`${failedRequests.length} objects failed to save`);
             }
+            
+            // Parse all responses to get modelObjectIds
+            const parsedResults = await Promise.all(
+              results.map(async (r) => ({
+                nodeId: r.nodeId,
+                data: await r.response.json()
+              }))
+            );
+            
+            // Update nodes with modelObjectIds from server
+            setNodes((nds) => 
+              nds.map((node) => {
+                const result = parsedResults.find((r) => r.nodeId === node.id);
+                if (result) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      modelObjectId: result.data?.id || result.data?.modelObjectId
+                    }
+                  };
+                }
+                return node;
+              })
+            );
+            
+            // Show saved status
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 2000);
             
             // Invalidate canvas query to refresh data
             queryClient.invalidateQueries({
@@ -1754,6 +1976,10 @@ function CanvasComponent() {
             });
           })
           .catch(error => {
+            // Show error status
+            setSaveStatus('error');
+            setTimeout(() => setSaveStatus('idle'), 5000);
+            
             console.error('Failed to save objects to database:', error);
             // Remove failed objects from local state
             const failedNodeIds = nodesToAdd.map((n: any) => n.id);
