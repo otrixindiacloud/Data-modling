@@ -330,8 +330,6 @@ interface RelationshipSyncInput {
   relationshipLevel: RelationshipLevel;
   sourceAttributeId: number | null;
   targetAttributeId: number | null;
-  sourceHandle?: string | null;
-  targetHandle?: string | null;
   name?: string | null;
   description?: string | null;
 }
@@ -493,14 +491,6 @@ async function synchronizeFamilyRelationships(
         updatePayload.targetAttributeId = targetModelAttributeId;
       }
 
-      if ((existing.sourceHandle ?? null) !== (params.sourceHandle ?? null)) {
-        updatePayload.sourceHandle = params.sourceHandle ?? null;
-      }
-
-      if ((existing.targetHandle ?? null) !== (params.targetHandle ?? null)) {
-        updatePayload.targetHandle = params.targetHandle ?? null;
-      }
-
       if ((existing.name ?? null) !== (params.name ?? null)) {
         updatePayload.name = params.name ?? null;
       }
@@ -530,8 +520,6 @@ async function synchronizeFamilyRelationships(
       relationshipLevel: expectedLevel,
       sourceAttributeId: sourceModelAttributeId,
       targetAttributeId: targetModelAttributeId,
-      sourceHandle: params.sourceHandle ?? undefined,
-      targetHandle: params.targetHandle ?? undefined,
       modelId: modelToSync.id,
       layer: modelToSync.layer as "conceptual" | "logical" | "physical",
       name: params.name === undefined ? undefined : params.name,
@@ -3352,8 +3340,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         relationshipLevel,
         sourceAttributeId: globalSourceAttributeId,
         targetAttributeId: globalTargetAttributeId,
-        sourceHandle: payload.sourceHandle ?? null,
-        targetHandle: payload.targetHandle ?? null,
         name: payload.name ?? null,
         description: payload.description ?? null,
       });
@@ -4646,8 +4632,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           id: rel.id.toString(),
           source: sourceModelObject.objectId.toString(),
           target: targetModelObject.objectId.toString(),
-          sourceHandle: rel.sourceHandle ?? undefined,
-          targetHandle: rel.targetHandle ?? undefined,
           type: 'smoothstep',
           label: rel.type,
           data: {

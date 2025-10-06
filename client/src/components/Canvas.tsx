@@ -117,7 +117,12 @@ function CanvasComponent() {
   useEffect(() => {
     console.log("Connection mode changed to:", connectionMode);
   }, [connectionMode]);
-  const [pendingConnection, setPendingConnection] = useState<{ source: string; target: string } | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{ 
+    source: string; 
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  } | null>(null);
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
   const [relationshipType, setRelationshipType] = useState<'1:1' | '1:N' | 'N:M'>('1:N');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -248,6 +253,8 @@ function CanvasComponent() {
       modelId: number;
       sourceAttributeId?: number;
       targetAttributeId?: number;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
     }) => {
       setSaveStatus('saving'); // Show saving indicator
       
@@ -1235,7 +1242,9 @@ function CanvasComponent() {
         // Store pending connection and show dialog for object-level relationship configuration
         setPendingConnection({
           source: params.source,
-          target: params.target
+          target: params.target,
+          sourceHandle: params.sourceHandle,
+          targetHandle: params.targetHandle
         });
         setShowConnectionDialog(true);
       }
@@ -1250,6 +1259,8 @@ function CanvasComponent() {
       id: `edge-${pendingConnection.source}-${pendingConnection.target}-${Date.now()}`,
       source: pendingConnection.source,
       target: pendingConnection.target,
+      sourceHandle: pendingConnection.sourceHandle || undefined,
+      targetHandle: pendingConnection.targetHandle || undefined,
       type: "smoothstep",
       animated: isManyToManyRelationship(relationshipType),
       style: buildRelationshipEdgeStyle(relationshipType),
@@ -1280,6 +1291,8 @@ function CanvasComponent() {
       targetObjectId: parseInt(pendingConnection.target),
       type: relationshipType,
       modelId: currentModel.id,
+      sourceHandle: pendingConnection.sourceHandle ?? null,
+      targetHandle: pendingConnection.targetHandle ?? null,
     }, {
       onSuccess: (data) => {
         // Update the edge with the actual relationship ID from the server

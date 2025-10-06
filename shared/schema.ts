@@ -152,6 +152,8 @@ export const dataModelObjectRelationships = pgTable("data_model_object_relations
   layer: text("layer").notNull(), // "conceptual", "logical", "physical"
   name: text("name"),
   description: text("description"),
+  sourceHandle: text("source_handle"), // React Flow source handle ID for edge layout
+  targetHandle: text("target_handle"), // React Flow target handle ID for edge layout
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

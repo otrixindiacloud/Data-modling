@@ -29,6 +29,13 @@
       "when": 1762203600000,
       "tag": "0005_ensure_data_object_relationships",
       "breakpoints": false
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762207200000,
+      "tag": "0006_add_edge_handles",
+      "breakpoints": false
     }
   ]
 }
