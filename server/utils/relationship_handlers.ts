@@ -57,14 +57,24 @@ export async function createRelationship(
     throw new Error("Source and target objects must be different");
   }
 
-  const model = await storage.getDataModel(validatedPayload.modelId);
+  console.log(`[RELATIONSHIP] Looking for model layer with ID: ${validatedPayload.modelId}`);
+  const model = await storage.getDataModelLayer(validatedPayload.modelId);
+  console.log(`[RELATIONSHIP] Model layer found:`, model ? `Yes (${model.name})` : 'No');
+  
   if (!model) {
     throw new Error("Model not found");
   }
 
   const modelObjects = await storage.getDataModelObjectsByModel(validatedPayload.modelId);
+  console.log(`[RELATIONSHIP] Found ${modelObjects.length} objects for model layer ${validatedPayload.modelId}`);
+  console.log(`[RELATIONSHIP] Looking for sourceObjectId: ${validatedPayload.sourceObjectId}, targetObjectId: ${validatedPayload.targetObjectId}`);
+  console.log(`[RELATIONSHIP] Available objectIds:`, modelObjects.map(mo => mo.objectId));
+  
   const sourceModelObject = modelObjects.find((modelObject) => modelObject.objectId === validatedPayload.sourceObjectId);
   const targetModelObject = modelObjects.find((modelObject) => modelObject.objectId === validatedPayload.targetObjectId);
+
+  console.log(`[RELATIONSHIP] Source model object found:`, !!sourceModelObject);
+  console.log(`[RELATIONSHIP] Target model object found:`, !!targetModelObject);
 
   if (!sourceModelObject || !targetModelObject) {
     throw new Error("Model objects not found for provided source/target");

@@ -1,10 +1,19 @@
 import { useLocation } from "wouter";
-import { Home, Layers3, Server, Settings, BarChart3, Building2, Database, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Home, Layers3, Server, Settings, BarChart3, Building2, Database, PanelLeftClose, PanelLeftOpen, LogOut, User } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface AppSidebarProps {
   onNavigate?: () => void;
@@ -61,10 +70,20 @@ const NAV_ITEMS: NavItem[] = [
 
 export function AppSidebar({ onNavigate, collapsed = false, onToggleCollapse }: AppSidebarProps) {
   const [location, setLocation] = useLocation();
+  const { user, organization, logout } = useAuth();
 
   const handleNavigate = (href: string) => {
     setLocation(href);
     onNavigate?.();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setLocation("/auth/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
   return (
@@ -191,10 +210,90 @@ export function AppSidebar({ onNavigate, collapsed = false, onToggleCollapse }: 
 
         <div
           className={cn(
-            "border-t border-border px-4 py-4 w-full",
+            "border-t border-border px-4 py-4 w-full space-y-4",
             collapsed && "px-2 py-3"
           )}
         >
+          {/* User menu */}
+          <div className={cn("w-full", collapsed && "flex justify-center")}>
+            {collapsed ? (
+              <Tooltip delayDuration={100}>
+                <TooltipTrigger asChild>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                      >
+                        <User className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" side="right" className="w-56">
+                      <DropdownMenuLabel>
+                        <div className="flex flex-col space-y-1">
+                          <p className="text-sm font-medium leading-none">{user?.name || "User"}</p>
+                          <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+                          {organization && (
+                            <p className="text-xs leading-none text-muted-foreground pt-1">
+                              {organization.name}
+                            </p>
+                          )}
+                        </div>
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive cursor-pointer">
+                        <LogOut className="mr-2 h-4 w-4" />
+                        <span>Log out</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p className="text-sm font-medium">Account</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start px-3 py-2 h-auto"
+                  >
+                    <div className="flex items-center gap-3 w-full">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                        <User className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col items-start flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate w-full">{user?.name || "User"}</p>
+                        <p className="text-xs text-muted-foreground truncate w-full">{organization?.name || "Organization"}</p>
+                      </div>
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="right" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">{user?.name || "User"}</p>
+                      <p className="text-xs leading-none text-muted-foreground">{user?.email}</p>
+                      {organization && (
+                        <p className="text-xs leading-none text-muted-foreground pt-1">
+                          {organization.name}
+                        </p>
+                      )}
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive cursor-pointer">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span>Log out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+
+          {/* Theme toggle */}
           <div
             className={cn(
               "rounded-lg bg-muted/40 p-4 flex flex-col gap-2",

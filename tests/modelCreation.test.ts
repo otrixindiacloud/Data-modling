@@ -16,7 +16,7 @@ import {
   type DataModel,
   type DataModelLayer,
   type DataModelObject,
-  type DataModelAttribute,
+  type DataModelObjectAttribute,
   type DataModelObjectRelationship,
   type DataModelProperty,
   type DataObject,
@@ -28,7 +28,7 @@ import {
   type InsertDataModelLayer,
   type InsertDataModelObject,
   type InsertDataObject,
-  type InsertDataModelAttribute,
+  type InsertDataModelObjectAttribute,
   type InsertDataModelObjectRelationship,
   type InsertDataObjectRelationship,
   type InsertSystem,
@@ -47,7 +47,7 @@ interface MockStore {
   dataModelObjects: DataModelObject[];
   attributes: Attribute[];
   dataObjectRelationships: DataObjectRelationship[];
-  dataModelAttributes: DataModelAttribute[];
+  dataModelAttributes: DataModelObjectAttribute[];
   dataModelObjectRelationships: DataModelObjectRelationship[];
   dataModelProperties: DataModelProperty[];
   dataModelLayerObjects: DataModelLayerObject[];
@@ -869,11 +869,11 @@ const storageMock = {
   async deleteAttributesByObject(objectId: number): Promise<void> {
     store.attributes = store.attributes.filter((attribute) => attribute.objectId !== objectId);
   },
-  async getDataModelAttributes(): Promise<DataModelAttribute[]> {
+  async getDataModelObjectAttributes(): Promise<DataModelObjectAttribute[]> {
     return store.dataModelAttributes;
   },
-  async createDataModelAttribute(attribute: InsertDataModelAttribute): Promise<DataModelAttribute> {
-    const newAttribute: DataModelAttribute = {
+  async createDataModelObjectAttribute(attribute: InsertDataModelObjectAttribute): Promise<DataModelObjectAttribute> {
+    const newAttribute: DataModelObjectAttribute = {
       id: ++counters.dataModelAttribute,
       attributeId: attribute.attributeId ?? null,
       modelObjectId: attribute.modelObjectId,
@@ -898,7 +898,7 @@ const storageMock = {
     store.dataModelAttributes.push(newAttribute);
     return newAttribute;
   },
-  async getDataModelAttribute(id: number): Promise<DataModelAttribute | undefined> {
+  async getDataModelAttribute(id: number): Promise<DataModelObjectAttribute | undefined> {
     return store.dataModelAttributes.find((attribute) => attribute.id === id);
   },
   async createDataModelObjectRelationship(

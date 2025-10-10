@@ -1138,14 +1138,13 @@ function CanvasComponent() {
           
           const targetModelId = currentLayerModel?.id || currentModel?.id;
           if (targetModelId) {
-            // Use navigator.sendBeacon for reliable cleanup save
+            // Note: sendBeacon doesn't support Authorization headers, so we use fetch with keepalive
             const data = JSON.stringify({ 
               positions,
               layer: currentLayer 
             });
             
-            navigator.sendBeacon?.(`/api/models/${targetModelId}/canvas/positions`, 
-              new Blob([data], { type: 'application/json' })) ||
+            // Use fetch with keepalive instead of sendBeacon to support auth headers
             fetch(`/api/models/${targetModelId}/canvas/positions`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1365,12 +1364,26 @@ function CanvasComponent() {
       }, 100);
     }
 
+    // Get the actual objectId from the node data, not the node ID
+    const sourceNode = nodes.find(n => n.id === pendingConnection.source);
+    const targetNode = nodes.find(n => n.id === pendingConnection.target);
+    
+    if (!sourceNode?.data?.objectId || !targetNode?.data?.objectId) {
+      console.error('Cannot create relationship: missing objectId in node data', {
+        sourceNode: sourceNode?.data,
+        targetNode: targetNode?.data
+      });
+      setPendingConnection(null);
+      setShowConnectionDialog(false);
+      return;
+    }
+
     // Save relationship to database
     saveRelationshipMutation.mutate({
-      sourceObjectId: parseInt(pendingConnection.source),
-      targetObjectId: parseInt(pendingConnection.target),
+      sourceObjectId: sourceNode.data.objectId,
+      targetObjectId: targetNode.data.objectId,
       type: relationshipType,
-      modelId: currentModel.id,
+      modelId: currentLayerModel?.id || currentModel.id,
       sourceHandle: pendingConnection.sourceHandle ?? null,
       targetHandle: pendingConnection.targetHandle ?? null,
     }, {
@@ -1399,7 +1412,7 @@ function CanvasComponent() {
     setPendingConnection(null);
     setShowConnectionDialog(false);
     setRelationshipType('1:N');
-  }, [pendingConnection, relationshipType, storeAddEdge, saveToHistory, setEdges, currentModel?.id, saveRelationshipMutation]);
+  }, [pendingConnection, relationshipType, storeAddEdge, saveToHistory, setEdges, currentModel?.id, currentLayerModel?.id, saveRelationshipMutation, nodes, isDataLoading]);
 
   const createAttributeRelationship = useCallback((relationshipData: {
     sourceAttributeId: number;
@@ -1441,12 +1454,26 @@ function CanvasComponent() {
       }, 100);
     }
 
+    // Get the actual objectId from the node data, not the node ID
+    const sourceNode = nodes.find(n => n.id === attributeConnection.sourceNode.id);
+    const targetNode = nodes.find(n => n.id === attributeConnection.targetNode.id);
+    
+    if (!sourceNode?.data?.objectId || !targetNode?.data?.objectId) {
+      console.error('Cannot create attribute relationship: missing objectId in node data', {
+        sourceNode: sourceNode?.data,
+        targetNode: targetNode?.data
+      });
+      setAttributeConnection(null);
+      setShowAttributeRelationshipModal(false);
+      return;
+    }
+
     // Save relationship to database with attribute details
     saveRelationshipMutation.mutate({
-      sourceObjectId: parseInt(attributeConnection.sourceNode.id),
-      targetObjectId: parseInt(attributeConnection.targetNode.id),
+      sourceObjectId: sourceNode.data.objectId,
+      targetObjectId: targetNode.data.objectId,
       type: relationshipData.type,
-      modelId: currentModel.id,
+      modelId: currentLayerModel?.id || currentModel.id,
       sourceAttributeId: relationshipData.sourceAttributeId,
       targetAttributeId: relationshipData.targetAttributeId,
     }, {
@@ -1474,7 +1501,7 @@ function CanvasComponent() {
     // Reset attribute connection state
     setAttributeConnection(null);
     setShowAttributeRelationshipModal(false);
-  }, [attributeConnection, storeAddEdge, saveToHistory, setEdges, currentModel?.id, saveRelationshipMutation]);
+  }, [attributeConnection, storeAddEdge, saveToHistory, setEdges, currentModel?.id, currentLayerModel?.id, saveRelationshipMutation, nodes, isDataLoading]);
 
   const onNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {

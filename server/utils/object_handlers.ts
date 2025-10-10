@@ -4,12 +4,12 @@ import type {
   DataModel,
   DataModelObject,
   Attribute,
-  DataModelAttribute,
+  DataModelObjectAttribute,
   DataModelObjectRelationship,
   InsertDataObject,
   InsertAttribute,
   InsertDataModelObject,
-  InsertDataModelAttribute,
+  InsertDataModelObjectAttribute,
   InsertDataObjectRelationship,
 } from "@shared/schema";
 import { z } from "zod";
@@ -169,7 +169,7 @@ export async function createDataObjectWithCascade(
 
   // Create attributes for base layer
   const baseAttributes: Attribute[] = [];
-  const baseDataModelAttributes: DataModelAttribute[] = [];
+  const baseDataModelAttributes: DataModelObjectAttribute[] = [];
 
   if (attributeInputs.length > 0) {
     for (let index = 0; index < attributeInputs.length; index++) {
@@ -205,7 +205,7 @@ export async function createDataObjectWithCascade(
       }
       attributesCache.get(primaryObject.id)!.push(createdAttribute);
 
-      const dataModelAttributePayload: InsertDataModelAttribute = {
+      const dataModelAttributePayload: InsertDataModelObjectAttribute = {
         attributeId: createdAttribute.id,
         modelObjectId: baseModelObject.id,
         modelId: baseModel.id,
@@ -221,9 +221,9 @@ export async function createDataObjectWithCascade(
           layer: baseLayer,
           originConceptualObjectId: baseLayer === "conceptual" ? primaryObject.id : null,
         },
-      } satisfies InsertDataModelAttribute;
+      } satisfies InsertDataModelObjectAttribute;
 
-      const createdDataModelAttribute = await storage.createDataModelAttribute(
+      const createdDataModelAttribute = await storage.createDataModelObjectAttribute(
         dataModelAttributePayload
       );
       baseDataModelAttributes.push(createdDataModelAttribute);

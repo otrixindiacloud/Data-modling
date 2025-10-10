@@ -99,7 +99,7 @@ import {
   insertConfigurationSchema,
   type DataModel,
   type DataModelObject,
-  type DataModelAttribute,
+  type DataModelObjectAttribute,
   type DataModelObjectRelationship,
   type DataModelProperty,
   type DataObject,
@@ -111,7 +111,7 @@ import {
   type InsertDataObject,
   type InsertAttribute,
   type InsertDataModelObject,
-  type InsertDataModelAttribute,
+  type InsertDataModelObjectAttribute,
   type InsertDataObjectRelationship
 } from "@shared/schema";
 import { getTargetSystemTemplate } from "./services/targetSystemTemplates";
@@ -311,7 +311,7 @@ async function resolveModelFamily(model: DataModel): Promise<ModelFamily> {
 }
 
 function findDataModelAttributeId(
-  attributes: DataModelAttribute[],
+  attributes: DataModelObjectAttribute[],
   modelId: number,
   modelObjectId: number,
   attributeId: number,
@@ -340,7 +340,7 @@ async function synchronizeFamilyRelationships(
   params: RelationshipSyncInput,
 ): Promise<Map<number, DataModelObjectRelationship>> {
   const family = await resolveModelFamily(params.baseModel);
-  const dataModelAttributes = await storage.getDataModelAttributes();
+  const dataModelAttributes = await storage.getDataModelObjectAttributes();
   const relationshipsByModelId = new Map<number, DataModelObjectRelationship>();
   const modelObjectsCache = new Map<number, DataModelObject[]>();
   const relationshipsCache = new Map<number, DataModelObjectRelationship[]>();
@@ -406,7 +406,7 @@ async function synchronizeFamilyRelationships(
         if (!sourceModelAttributeId && params.sourceAttributeId) {
           const globalAttr = await storage.getAttribute(params.sourceAttributeId);
           if (globalAttr) {
-            const newModelAttr = await storage.createDataModelAttribute({
+            const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.sourceAttributeId,
               modelObjectId: sourceModelObject.id,
               modelId: modelToSync.id,
@@ -426,7 +426,7 @@ async function synchronizeFamilyRelationships(
         if (!targetModelAttributeId && params.targetAttributeId) {
           const globalAttr = await storage.getAttribute(params.targetAttributeId);
           if (globalAttr) {
-            const newModelAttr = await storage.createDataModelAttribute({
+            const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.targetAttributeId,
               modelObjectId: targetModelObject.id,
               modelId: modelToSync.id,
@@ -547,7 +547,7 @@ async function synchronizeFamilyRelationships(
 
 async function removeFamilyRelationships(params: RelationshipSyncInput): Promise<void> {
   const family = await resolveModelFamily(params.baseModel);
-  const dataModelAttributes = await storage.getDataModelAttributes();
+  const dataModelAttributes = await storage.getDataModelObjectAttributes();
   const modelsToSync = [family.conceptual, family.logical, family.physical].filter(
     (entry): entry is DataModel => Boolean(entry),
   );
@@ -720,7 +720,7 @@ interface LayerCreationResult {
   object: DataObject;
   modelObject: DataModelObject;
   attributes: Attribute[];
-  dataModelAttributes: DataModelAttribute[];
+  dataModelAttributes: DataModelObjectAttribute[];
 }
 
 function mergeLayerConfig(base: ModelObjectConfigInput, override?: ModelObjectConfigInput): ModelObjectConfigInput {
@@ -829,7 +829,7 @@ async function replicateObjectToLayer(params: {
   modelObjectsCache.get(targetModel.id)!.push(modelObject);
 
     const createdAttributes: Attribute[] = [];
-    const createdDataModelAttributes: DataModelAttribute[] = [];
+    const createdDataModelAttributes: DataModelObjectAttribute[] = [];
 
   for (let index = 0; index < attributeInputs.length; index++) {
     const attributeInput = attributeInputs[index];
@@ -874,7 +874,7 @@ async function replicateObjectToLayer(params: {
     }
     attributesCache.get(clonedObject.id)!.push(attribute);
 
-    const dataModelAttributePayload: InsertDataModelAttribute = {
+    const dataModelAttributePayload: InsertDataModelObjectAttribute = {
       attributeId: attribute.id,
       modelObjectId: modelObject.id,
       modelId: targetModel.id,
@@ -891,9 +891,9 @@ async function replicateObjectToLayer(params: {
         originConceptualModelId: conceptualModel.id,
         originConceptualAttributeName: attributeInput.name,
       },
-    } satisfies InsertDataModelAttribute;
+    } satisfies InsertDataModelObjectAttribute;
 
-    const dataModelAttribute = await storage.createDataModelAttribute(dataModelAttributePayload);
+    const dataModelAttribute = await storage.createDataModelObjectAttribute(dataModelAttributePayload);
     createdDataModelAttributes.push(dataModelAttribute);
   }
 
@@ -1853,7 +1853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       modelObjectsCache.set(baseModel.id, [baseModelObject]);
 
       const baseAttributes: Attribute[] = [];
-      const baseDataModelAttributes: DataModelAttribute[] = [];
+      const baseDataModelAttributes: DataModelObjectAttribute[] = [];
 
       if (attributeInputs.length > 0) {
         for (let index = 0; index < attributeInputs.length; index++) {
@@ -1889,7 +1889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           attributesCache.get(primaryObject.id)!.push(createdAttribute);
 
-          const dataModelAttributePayload: InsertDataModelAttribute = {
+          const dataModelAttributePayload: InsertDataModelObjectAttribute = {
             attributeId: createdAttribute.id,
             modelObjectId: baseModelObject.id,
             modelId: baseModel.id,
@@ -1905,9 +1905,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               layer: baseLayer,
               originConceptualObjectId: baseLayer === "conceptual" ? primaryObject.id : null,
             },
-          } satisfies InsertDataModelAttribute;
+          } satisfies InsertDataModelObjectAttribute;
 
-          const createdDataModelAttribute = await storage.createDataModelAttribute(dataModelAttributePayload);
+          const createdDataModelAttribute = await storage.createDataModelObjectAttribute(dataModelAttributePayload);
           baseDataModelAttributes.push(createdDataModelAttribute);
         }
       }
@@ -2588,7 +2588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllDataObjects(),
         storage.getDataModelObjects(),
         storage.getAllAttributes(),
-        storage.getDataModelAttributes(),
+        storage.getDataModelObjectAttributes(),
         storage.getDataObjectRelationships(),
         storage.getDataModelObjectRelationships(),
         storage.getDataModelProperties(),
@@ -2634,8 +2634,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         modelObjectsByObjectId.set(modelObject.objectId, list);
       });
 
-      const modelAttributesByModelObjectId = new Map<number, DataModelAttribute[]>();
-      const modelAttributesByAttributeId = new Map<number, DataModelAttribute[]>();
+      const modelAttributesByModelObjectId = new Map<number, DataModelObjectAttribute[]>();
+      const modelAttributesByAttributeId = new Map<number, DataModelObjectAttribute[]>();
       modelAttributes.forEach((modelAttr) => {
         const listByModelObject = modelAttributesByModelObjectId.get(modelAttr.modelObjectId) ?? [];
         listByModelObject.push(modelAttr);

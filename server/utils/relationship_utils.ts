@@ -1,8 +1,9 @@
 import { storage } from "../storage";
 import type {
   DataModel,
+  DataModelLayer,
   DataModelObject,
-  DataModelAttribute,
+  DataModelObjectAttribute,
   DataModelObjectRelationship,
   DataObjectRelationship,
   InsertDataModelObjectRelationship,
@@ -66,7 +67,7 @@ export function findMatchingDataObjectRelationship(
 }
 
 export interface RelationshipSyncInput {
-  baseModel: DataModel;
+  baseModel: DataModelLayer;
   sourceObjectId: number;
   targetObjectId: number;
   type: string;
@@ -83,7 +84,7 @@ export async function synchronizeFamilyRelationships(
   params: RelationshipSyncInput,
 ): Promise<Map<number, DataModelObjectRelationship>> {
   const family = await resolveModelFamily(params.baseModel);
-  const dataModelAttributes = await storage.getDataModelAttributes();
+  const dataModelAttributes = await storage.getDataModelObjectAttributes();
   const relationshipsByModelId = new Map<number, DataModelObjectRelationship>();
   const modelObjectsCache = new Map<number, DataModelObject[]>();
   const relationshipsCache = new Map<number, DataModelObjectRelationship[]>();
@@ -107,7 +108,7 @@ export async function synchronizeFamilyRelationships(
   };
 
   const modelsToSync = [family.conceptual, family.logical, family.physical].filter(
-    (entry): entry is DataModel => Boolean(entry),
+    (entry): entry is DataModelLayer => Boolean(entry),
   );
 
   for (const modelToSync of modelsToSync) {
@@ -147,10 +148,10 @@ export async function synchronizeFamilyRelationships(
         if (!sourceModelAttributeId && params.sourceAttributeId) {
           const globalAttr = await storage.getAttribute(params.sourceAttributeId);
           if (globalAttr) {
-            const newModelAttr = await storage.createDataModelAttribute({
+            const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.sourceAttributeId,
               modelObjectId: sourceModelObject.id,
-              modelId: modelToSync.id,
+              modelId: modelToSync.dataModelId,
               conceptualType: globalAttr.conceptualType,
               logicalType: globalAttr.logicalType,
               physicalType: globalAttr.physicalType,
@@ -167,10 +168,10 @@ export async function synchronizeFamilyRelationships(
         if (!targetModelAttributeId && params.targetAttributeId) {
           const globalAttr = await storage.getAttribute(params.targetAttributeId);
           if (globalAttr) {
-            const newModelAttr = await storage.createDataModelAttribute({
+            const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.targetAttributeId,
               modelObjectId: targetModelObject.id,
-              modelId: modelToSync.id,
+              modelId: modelToSync.dataModelId,
               conceptualType: globalAttr.conceptualType,
               logicalType: globalAttr.logicalType,
               physicalType: globalAttr.physicalType,
@@ -272,7 +273,7 @@ export async function synchronizeFamilyRelationships(
       targetAttributeId: targetModelAttributeId,
       sourceHandle: params.sourceHandle ?? undefined,
       targetHandle: params.targetHandle ?? undefined,
-      modelId: modelToSync.id,
+      modelId: modelToSync.id, // Use layer model ID, not parent dataModelId
       layer: modelToSync.layer as "conceptual" | "logical" | "physical",
       name: params.name === undefined ? undefined : params.name,
       description: params.description === undefined ? undefined : params.description,
@@ -287,9 +288,9 @@ export async function synchronizeFamilyRelationships(
 
 export async function removeFamilyRelationships(params: RelationshipSyncInput): Promise<void> {
   const family = await resolveModelFamily(params.baseModel);
-  const dataModelAttributes = await storage.getDataModelAttributes();
+  const dataModelAttributes = await storage.getDataModelObjectAttributes();
   const modelsToSync = [family.conceptual, family.logical, family.physical].filter(
-    (entry): entry is DataModel => Boolean(entry),
+    (entry): entry is DataModelLayer => Boolean(entry),
   );
 
   for (const modelToSync of modelsToSync) {

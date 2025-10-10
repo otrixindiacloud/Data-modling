@@ -1,6 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { authenticationMiddleware } from "./middleware/auth";
+import { authService } from "./services/authService";
+import { signAuthToken } from "./auth/jwt";
 import { aiEngine } from "./services/aiEngine";
 import { dataConnectors } from "./services/dataConnectors";
 import { generateHeuristicForeignKeys } from "./services/relationshipHeuristics";
@@ -163,7 +166,7 @@ import {
   type DataModel,
   type DataModelLayer,
   type DataModelObject,
-  type DataModelAttribute,
+  type DataModelObjectAttribute,
   type DataModelObjectRelationship,
   type DataModelProperty,
   type DataObject,
@@ -175,13 +178,164 @@ import {
   type InsertDataObject,
   type InsertAttribute,
   type InsertDataModelObject,
-  type InsertDataModelAttribute,
+  type InsertDataModelObjectAttribute,
   type InsertDataObjectRelationship
 } from "@shared/schema";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const loginSchema = z.object({
+    identifier: z.string().min(3, "User ID is required"),
+    password: z.string().min(6, "Password is required"),
+  });
+
+  const registerSchema = z
+    .object({
+      organizationName: z.string().min(3, "Organization name is required"),
+      organizationSlug: z
+        .string()
+        .regex(/^[a-z0-9-]+$/i, "Slug may contain letters, numbers, and dashes")
+        .min(3, "Slug must be at least 3 characters")
+        .max(64, "Slug is too long")
+        .optional(),
+      email: z.string().email("Valid email is required"),
+      password: z.string().min(8, "Password must be at least 8 characters"),
+      userName: z.string().min(1, "Name is required").max(120, "Name is too long").optional(),
+    })
+    .strict();
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { identifier, password } = loginSchema.parse(req.body);
+      const result = await authService.authenticateWithPassword(identifier, password);
+
+      if (!result) {
+        return res.status(401).json({ message: "Invalid user ID or password" });
+      }
+
+      const roles = result.memberships.map((membership) => membership.role);
+      const context = {
+        userId: result.user.id,
+        organizationId: result.user.organizationId,
+        roles,
+        isSuperAdmin: Boolean(result.user.isSuperAdmin),
+      };
+
+      const token = signAuthToken(context);
+
+      res.json({
+        token,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name,
+          isSuperAdmin: result.user.isSuperAdmin,
+        },
+        organization: {
+          id: result.organization.id,
+          name: result.organization.name,
+          slug: result.organization.slug,
+        },
+        roles,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid login payload", errors: error.flatten() });
+        return;
+      }
+      console.error("Login failed", error);
+      res.status(500).json({ message: "Failed to authenticate user" });
+    }
+  });
+
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const payload = registerSchema.parse(req.body);
+      const result = await authService.registerAccount({
+        organizationName: payload.organizationName,
+        organizationSlug: payload.organizationSlug,
+        email: payload.email,
+        password: payload.password,
+        userName: payload.userName,
+      });
+
+      const roles = result.memberships.map((membership) => membership.role);
+      const context = {
+        userId: result.user.id,
+        organizationId: result.user.organizationId,
+        roles,
+        isSuperAdmin: Boolean(result.user.isSuperAdmin),
+      };
+
+      const token = signAuthToken(context);
+
+      res.status(201).json({
+        token,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name,
+          isSuperAdmin: result.user.isSuperAdmin,
+        },
+        organization: {
+          id: result.organization.id,
+          name: result.organization.name,
+          slug: result.organization.slug,
+        },
+        roles,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid registration payload", errors: error.flatten() });
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : "Registration failed";
+      const statusCode = message.includes("already exists") ? 409 : 500;
+      console.error("Registration failed", error);
+      res.status(statusCode).json({ message });
+    }
+  });
+
+  app.use(authenticationMiddleware);
+
+  app.post("/api/auth/logout", async (_req, res) => {
+    res.status(204).send();
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    try {
+      if (!req.auth) {
+        return res.status(401).json({ message: "Unauthenticated" });
+      }
+
+      const profile = await authService.getUserProfile(req.auth.userId);
+      if (!profile) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const roles = profile.memberships.map((membership) => membership.role);
+      res.json({
+        user: {
+          id: profile.user.id,
+          email: profile.user.email,
+          name: profile.user.name,
+          isSuperAdmin: profile.user.isSuperAdmin,
+        },
+        organization: {
+          id: profile.organization.id,
+          name: profile.organization.name,
+          slug: profile.organization.slug,
+        },
+        roles,
+      });
+    } catch (error) {
+      console.error("Failed to load authenticated profile", error);
+      res.status(500).json({ message: "Failed to load authenticated profile" });
+    }
+  });
+
   app.get("/api/models", async (req, res) => {
     try {
       const models = await storage.getDataModelLayers();
@@ -460,6 +614,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         layerSpecificConfig: layerSpecificConfig || {}
       });
       
+      // CRITICAL FIX: Create attribute projections for this model object
+      // Get canonical attributes for the data object
+      const canonicalAttributes = await storage.getAttributesByObject(objectId);
+      
+      // Create data_model_object_attributes for each canonical attribute
+      for (const canonicalAttr of canonicalAttributes) {
+        await storage.createDataModelObjectAttribute({
+          attributeId: canonicalAttr.id,
+          modelObjectId: dataModelObject.id,
+          modelId: modelId,
+          name: canonicalAttr.name,
+          description: canonicalAttr.description ?? undefined,
+          dataType: canonicalAttr.dataType ?? undefined,
+          conceptualType: canonicalAttr.conceptualType ?? undefined,
+          logicalType: canonicalAttr.logicalType ?? undefined,
+          physicalType: canonicalAttr.physicalType ?? undefined,
+          length: canonicalAttr.length ?? undefined,
+          precision: canonicalAttr.precision ?? undefined,
+          scale: canonicalAttr.scale ?? undefined,
+          nullable: canonicalAttr.nullable ?? true,
+          isPrimaryKey: canonicalAttr.isPrimaryKey ?? false,
+          isForeignKey: canonicalAttr.isForeignKey ?? false,
+          orderIndex: canonicalAttr.orderIndex ?? 0,
+          layerSpecificConfig: {},
+        });
+      }
+      
+      console.log(`✅ Created data_model_object and ${canonicalAttributes.length} attribute projections for object ${objectId} in model ${modelId}`);
+      
       res.status(201).json(dataModelObject);
     } catch (error) {
       console.error("Error adding object to model:", error);
@@ -528,7 +711,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (modelObject) {
         // User-created object - fetch attributes from data_model_attributes
-        const allModelAttributes = await storage.getDataModelAttributes();
+        const allModelAttributes = await storage.getDataModelObjectAttributes();
         const attributes = allModelAttributes.filter(attr => attr.modelObjectId === id);
         
         // Get domain and area names
@@ -775,7 +958,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (modelObject) {
         // User-created object - fetch from data_model_attributes by modelObjectId
-        const allModelAttributes = await storage.getDataModelAttributes();
+        const allModelAttributes = await storage.getDataModelObjectAttributes();
         const attributes = allModelAttributes.filter(attr => attr.modelObjectId === objectId);
         
         console.log('Found user-created attributes:', attributes);
@@ -815,7 +998,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (modelObject) {
         // User-created object - create in data_model_attributes
-        const attributePayload: InsertDataModelAttribute = {
+        const attributePayload: InsertDataModelObjectAttribute = {
           attributeId: null, // NULL = user-created attribute
           modelObjectId: objectId,
           modelId: modelObject.modelId,
@@ -835,7 +1018,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           layerSpecificConfig: {},
         };
         
-        const attribute = await storage.createDataModelAttribute(attributePayload);
+        const attribute = await storage.createDataModelObjectAttribute(attributePayload);
         return res.status(201).json(attribute);
       }
       
@@ -869,7 +1052,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const modelAttribute = await storage.getDataModelAttribute(id);
       if (modelAttribute) {
         // Update in data_model_attributes (partial update)
-        const updated = await storage.updateDataModelAttribute(id, req.body);
+        const updated = await storage.updateDataModelObjectAttribute(id, req.body);
         return res.json(updated);
       }
       
@@ -928,7 +1111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isForeignKey: req.body.isForeignKey ?? modelAttribute.isForeignKey,
           orderIndex: req.body.orderIndex ?? modelAttribute.orderIndex,
         };
-        const updated = await storage.updateDataModelAttribute(id, updateData);
+        const updated = await storage.updateDataModelObjectAttribute(id, updateData);
         return res.json(updated);
       }
       
@@ -949,7 +1132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const modelAttribute = await storage.getDataModelAttribute(id);
       if (modelAttribute) {
         // Delete from data_model_attributes
-        await storage.deleteDataModelAttribute(id);
+        await storage.deleteDataModelObjectAttribute(id);
         return res.status(204).send();
       }
       
@@ -1051,7 +1234,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getAllDataObjects(),
         storage.getDataModelObjects(),
         storage.getAllAttributes(),
-        storage.getDataModelAttributes(),
+        storage.getDataModelObjectAttributes(),
         storage.getDataObjectRelationships(),
         storage.getDataModelObjectRelationships(),
         storage.getDataModelProperties(),
@@ -1100,8 +1283,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       });
 
-      const modelAttributesByModelObjectId = new Map<number, DataModelAttribute[]>();
-      const modelAttributesByAttributeId = new Map<number, DataModelAttribute[]>();
+      const modelAttributesByModelObjectId = new Map<number, DataModelObjectAttribute[]>();
+      const modelAttributesByAttributeId = new Map<number, DataModelObjectAttribute[]>();
       modelAttributes.forEach((modelAttr) => {
         const listByModelObject = modelAttributesByModelObjectId.get(modelAttr.modelObjectId) ?? [];
         listByModelObject.push(modelAttr);
@@ -1725,9 +1908,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/relationships", async (req, res) => {
     try {
+      console.log("[RELATIONSHIP] Creating relationship with payload:", JSON.stringify(req.body, null, 2));
       const result = await createRelationship(req.body, storage);
       res.status(201).json(result);
     } catch (error) {
+      console.error("[RELATIONSHIP] Error creating relationship:", error instanceof Error ? error.message : error);
       const errorResponse = handleError(error);
       res.status(errorResponse.status).json(errorResponse.body);
     }
@@ -2272,7 +2457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const visibleModelObjects = modelObjects.filter(mo => mo.isVisible !== false);
   
   // Get model attributes for all model objects in this model
-  const allModelAttributes = await storage.getDataModelAttributes();
+  const allModelAttributes = await storage.getDataModelObjectAttributes();
   const modelAttributes = allModelAttributes.filter(attr => attr.modelId === modelId);
   const modelAttributesByModelObjectId = new Map<number, typeof modelAttributes>();
   modelAttributes.forEach((attr: typeof modelAttributes[0]) => {
@@ -2282,6 +2467,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
       
   const relationships = await storage.getDataModelObjectRelationshipsByModel(modelId);
+  console.log(`[CANVAS] Found ${relationships.length} relationships for model ${modelId}`);
   const modelObjectsById = new Map(modelObjects.map(mo => [mo.id, mo]));
   const relevantObjectIds = new Set(modelObjects.map(mo => mo.objectId).filter((id): id is number => id !== null));
   const dataObjectRelationships = await storage.getDataObjectRelationships();
@@ -2444,13 +2630,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const relationshipLevel = rel.relationshipLevel === "attribute" ? "attribute" : "object";
         
-        // For user-created objects (objectId is null), use model object ID instead
-        const sourceId = sourceModelObject.objectId ?? sourceModelObject.id;
-        const targetId = targetModelObject.objectId ?? targetModelObject.id;
+        // Use model object IDs for edge source/target to match node IDs
+        const sourceId = sourceModelObject.id;
+        const targetId = targetModelObject.id;
+        
+        // For global relationship lookup, use data object IDs
+        const sourceDataObjectId = sourceModelObject.objectId ?? sourceModelObject.id;
+        const targetDataObjectId = targetModelObject.objectId ?? targetModelObject.id;
         
         const key = buildRelationshipKey(
-          sourceId,
-          targetId,
+          sourceDataObjectId,
+          targetDataObjectId,
           relationshipLevel,
           globalSourceAttributeId,
           globalTargetAttributeId,
@@ -2478,6 +2668,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Filter out null edges
       const validEdges = edges.filter(edge => edge !== null);
+      console.log(`[CANVAS] Returning ${validEdges.length} valid edges out of ${edges.length} total edges`);
+      if (validEdges.length > 0) {
+        console.log(`[CANVAS] Sample edge:`, JSON.stringify(validEdges[0], null, 2));
+      }
       
       res.json({ nodes: validNodes, edges: validEdges });
     } catch (error) {

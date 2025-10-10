@@ -5,7 +5,7 @@ import {
   dataAreas,
   dataObjects,
   dataModelObjects,
-  dataModelAttributes,
+  dataModelObjectAttributes,
   dataModelProperties,
   dataObjectRelationships,
   dataModelObjectRelationships,
@@ -2456,7 +2456,7 @@ export async function seedDatabase() {
       await trx.delete(dataModelSystemMappings);
       await trx.delete(businessCapabilities);
       await trx.delete(modelLifecyclePhases);
-    await trx.delete(dataModelAttributes);
+    await trx.delete(dataModelObjectAttributes);
     await trx.delete(dataModelProperties);
     await trx.delete(dataModelObjectRelationships);
     await trx.delete(dataObjectRelationships);

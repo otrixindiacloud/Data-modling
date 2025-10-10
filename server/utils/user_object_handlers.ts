@@ -7,9 +7,9 @@ import { z } from "zod";
 import type { Storage } from "../storage";
 import type {
   InsertDataModelObject,
-  InsertDataModelAttribute,
+  InsertDataModelObjectAttribute,
   DataModelObject,
-  DataModelAttribute,
+  DataModelObjectAttribute,
   DataModel,
 } from "../../shared/schema";
 
@@ -46,7 +46,7 @@ export type UserObjectInput = z.infer<typeof userObjectInputSchema>;
 
 export interface UserObjectResult {
   modelObject: DataModelObject;
-  attributes: DataModelAttribute[];
+  attributes: DataModelObjectAttribute[];
 }
 
 /**
@@ -88,12 +88,12 @@ export async function createUserObject(
   const modelObject = await storage.createDataModelObject(modelObjectPayload);
 
   // Create attributes directly in data_model_attributes (NO attributeId)
-  const attributes: DataModelAttribute[] = [];
+  const attributes: DataModelObjectAttribute[] = [];
   if (validated.attributes && validated.attributes.length > 0) {
     for (let i = 0; i < validated.attributes.length; i++) {
       const attr = validated.attributes[i];
       
-      const attributePayload: InsertDataModelAttribute = {
+      const attributePayload: InsertDataModelObjectAttribute = {
         attributeId: null, // NULL = user-created attribute (not from system sync)
         modelObjectId: modelObject.id,
         modelId: validated.modelId,
@@ -113,7 +113,7 @@ export async function createUserObject(
         layerSpecificConfig: {},
       };
 
-      const createdAttr = await storage.createDataModelAttribute(attributePayload);
+      const createdAttr = await storage.createDataModelObjectAttribute(attributePayload);
       attributes.push(createdAttr);
     }
   }

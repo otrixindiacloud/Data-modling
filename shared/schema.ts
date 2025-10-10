@@ -3,6 +3,55 @@ import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Multi-tenant auth tables (Phase 1)
+export const organizations = pgTable("organizations", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id).notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name"),
+  isActive: boolean("is_active").default(true),
+  isSuperAdmin: boolean("is_super_admin").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").references(() => users.id).notNull(),
+    organizationId: integer("organization_id").references(() => organizations.id).notNull(),
+    role: text("role").notNull(),
+    invitedByUserId: integer("invited_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    membershipUnique: uniqueIndex("memberships_user_org_unique").on(table.userId, table.organizationId),
+  }),
+);
+
+export const invitations = pgTable("invitations", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id).notNull(),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique(),
+  invitedByUserId: integer("invited_by_user_id").references(() => users.id),
+  accepted: boolean("accepted").default(false),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Systems - Unified source and target systems
 export const systems = pgTable("systems", {
   id: serial("id").primaryKey(),
@@ -150,7 +199,7 @@ export const attributes = pgTable("data_object_attributes", {
 
 // Data Model Attributes - Attributes within specific models and objects with layer-specific properties
 // NOTE: attributeId is nullable - NULL for user-created attributes, NOT NULL for system-synced attributes
-export const dataModelAttributes = pgTable("data_model_attributes", {
+export const dataModelObjectAttributes = pgTable("data_model_object_attributes", {
   id: serial("id").primaryKey(),
   attributeId: integer("attribute_id").references(() => attributes.id), // NULL for user-created attributes
   modelObjectId: integer("model_object_id").references(() => dataModelObjects.id).notNull(),
@@ -215,9 +264,9 @@ export const dataModelObjectRelationships = pgTable("data_model_object_relations
   targetModelObjectId: integer("target_model_object_id").references(() => dataModelObjects.id).notNull(),
   type: text("type").notNull(), // "1:1", "1:N", "N:M"
   relationshipLevel: text("relationship_level").notNull(), // "object", "attribute"
-  sourceAttributeId: integer("source_attribute_id").references(() => dataModelAttributes.id),
-  targetAttributeId: integer("target_attribute_id").references(() => dataModelAttributes.id),
-  modelId: integer("model_id").references(() => dataModels.id).notNull(),
+  sourceAttributeId: integer("source_attribute_id").references(() => dataModelObjectAttributes.id),
+  targetAttributeId: integer("target_attribute_id").references(() => dataModelObjectAttributes.id),
+  modelId: integer("model_id").references(() => dataModelLayers.id).notNull(),
   layer: text("layer").notNull(), // "conceptual", "logical", "physical"
   name: text("name"),
   description: text("description"),
@@ -433,7 +482,7 @@ export const systemsRelations = relations(systems, ({ many }) => ({
 // Relations for Data Model Layers (child table)
 export const dataModelLayersRelations = relations(dataModelLayers, ({ many, one }) => ({
   modelObjects: many(dataModelObjects),
-  modelAttributes: many(dataModelAttributes),
+  modelAttributes: many(dataModelObjectAttributes),
   relationships: many(dataModelObjectRelationships),
   properties: many(dataModelProperties),
   layerObjectLinks: many(dataModelLayerObjects),
@@ -539,7 +588,7 @@ export const dataModelObjectsRelations = relations(dataModelObjects, ({ one, man
     references: [systems.id],
     relationName: "targetSystem"
   }),
-  modelAttributes: many(dataModelAttributes),
+  modelAttributes: many(dataModelObjectAttributes),
   sourceRelationships: many(dataModelObjectRelationships, {
     relationName: "sourceModelObject",
   }),
@@ -560,20 +609,20 @@ export const dataModelLayerObjectsRelations = relations(dataModelLayerObjects, (
 }));
 
 export const attributesRelations = relations(attributes, ({ many }) => ({
-  modelAttributes: many(dataModelAttributes),
+  modelAttributes: many(dataModelObjectAttributes),
 }));
 
-export const dataModelAttributesRelations = relations(dataModelAttributes, ({ one }) => ({
+export const dataModelObjectAttributesRelations = relations(dataModelObjectAttributes, ({ one }) => ({
   attribute: one(attributes, {
-    fields: [dataModelAttributes.attributeId],
+    fields: [dataModelObjectAttributes.attributeId],
     references: [attributes.id],
   }),
   modelObject: one(dataModelObjects, {
-    fields: [dataModelAttributes.modelObjectId],
+    fields: [dataModelObjectAttributes.modelObjectId],
     references: [dataModelObjects.id],
   }),
   modelLayer: one(dataModelLayers, {
-    fields: [dataModelAttributes.modelId],
+    fields: [dataModelObjectAttributes.modelId],
     references: [dataModelLayers.id],
   }),
 }));
@@ -617,13 +666,13 @@ export const dataModelObjectRelationshipsRelations = relations(dataModelObjectRe
     references: [dataModelObjects.id],
     relationName: "targetModelObject",
   }),
-  sourceAttribute: one(dataModelAttributes, {
+  sourceAttribute: one(dataModelObjectAttributes, {
     fields: [dataModelObjectRelationships.sourceAttributeId],
-    references: [dataModelAttributes.id],
+    references: [dataModelObjectAttributes.id],
   }),
-  targetAttribute: one(dataModelAttributes, {
+  targetAttribute: one(dataModelObjectAttributes, {
     fields: [dataModelObjectRelationships.targetAttributeId],
-    references: [dataModelAttributes.id],
+    references: [dataModelObjectAttributes.id],
   }),
   modelLayer: one(dataModelLayers, {
     fields: [dataModelObjectRelationships.modelId],
@@ -783,7 +832,7 @@ export const insertAttributeSchema = createInsertSchema(attributes).omit({
   updatedAt: true,
 });
 
-export const insertDataModelAttributeSchema = createInsertSchema(dataModelAttributes).omit({
+export const insertDataModelObjectAttributeSchema = createInsertSchema(dataModelObjectAttributes).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -912,8 +961,8 @@ export type InsertDataModelObject = z.infer<typeof insertDataModelObjectSchema>;
 export type Attribute = typeof attributes.$inferSelect;
 export type InsertAttribute = z.infer<typeof insertAttributeSchema>;
 
-export type DataModelAttribute = typeof dataModelAttributes.$inferSelect;
-export type InsertDataModelAttribute = z.infer<typeof insertDataModelAttributeSchema>;
+export type DataModelObjectAttribute = typeof dataModelObjectAttributes.$inferSelect;
+export type InsertDataModelObjectAttribute = z.infer<typeof insertDataModelObjectAttributeSchema>;
 
 export type DataModelProperty = typeof dataModelProperties.$inferSelect;
 export type InsertDataModelProperty = z.infer<typeof insertDataModelPropertySchema>;
@@ -962,3 +1011,12 @@ export type InsertModelLifecyclePhase = z.infer<typeof insertModelLifecyclePhase
 
 export type ModelLifecycleAssignment = typeof modelLifecycleAssignments.$inferSelect;
 export type InsertModelLifecycleAssignment = z.infer<typeof insertModelLifecycleAssignmentSchema>;
+
+export type Organization = typeof organizations.$inferSelect;
+export type InsertOrganization = typeof organizations.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type Membership = typeof memberships.$inferSelect;
+export type InsertMembership = typeof memberships.$inferInsert;
+export type Invitation = typeof invitations.$inferSelect;
+export type InsertInvitation = typeof invitations.$inferInsert;

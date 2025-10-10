@@ -7,7 +7,7 @@ import {
   dataModelObjects,
   dataModelLayerObjects,
   attributes,
-  dataModelAttributes,
+  dataModelObjectAttributes,
   dataModelProperties,
   dataObjectRelationships,
   dataModelObjectRelationships,
@@ -33,8 +33,8 @@ import {
   type InsertDataModelObject,
   type Attribute,
   type InsertAttribute,
-  type DataModelAttribute,
-  type InsertDataModelAttribute,
+  type DataModelObjectAttribute,
+  type InsertDataModelObjectAttribute,
   type DataModelProperty,
   type InsertDataModelProperty,
   type DataObjectRelationship,
@@ -135,12 +135,12 @@ export interface IStorage {
   deleteAttribute(id: number): Promise<void>;
   deleteAttributesByObject(objectId: number): Promise<void>;
 
-  // Data Model Attributes
-  getDataModelAttributes(): Promise<DataModelAttribute[]>;
-  getDataModelAttribute(id: number): Promise<DataModelAttribute | undefined>;
-  createDataModelAttribute(attribute: InsertDataModelAttribute): Promise<DataModelAttribute>;
-  updateDataModelAttribute(id: number, attribute: Partial<InsertDataModelAttribute>): Promise<DataModelAttribute>;
-  deleteDataModelAttribute(id: number): Promise<void>;
+  // Data Model Object Attributes
+  getDataModelObjectAttributes(): Promise<DataModelObjectAttribute[]>;
+  getDataModelObjectAttribute(id: number): Promise<DataModelObjectAttribute | undefined>;
+  createDataModelObjectAttribute(attribute: InsertDataModelObjectAttribute): Promise<DataModelObjectAttribute>;
+  updateDataModelObjectAttribute(id: number, attribute: Partial<InsertDataModelObjectAttribute>): Promise<DataModelObjectAttribute>;
+  deleteDataModelObjectAttribute(id: number): Promise<void>;
 
   // Data Model Properties
   getDataModelProperties(): Promise<DataModelProperty[]>;
@@ -685,28 +685,28 @@ export class Storage implements IStorage {
     return result;
   }
 
-  // Data Model Attributes
-  async getDataModelAttributes(): Promise<DataModelAttribute[]> {
-    return await db.select().from(dataModelAttributes);
+  // Data Model Object Attributes
+  async getDataModelObjectAttributes(): Promise<DataModelObjectAttribute[]> {
+    return await db.select().from(dataModelObjectAttributes);
   }
 
-  async getDataModelAttribute(id: number): Promise<DataModelAttribute | undefined> {
-    const result = await db.select().from(dataModelAttributes).where(eq(dataModelAttributes.id, id));
+  async getDataModelObjectAttribute(id: number): Promise<DataModelObjectAttribute | undefined> {
+    const result = await db.select().from(dataModelObjectAttributes).where(eq(dataModelObjectAttributes.id, id));
     return result[0];
   }
 
-  async createDataModelAttribute(attribute: InsertDataModelAttribute): Promise<DataModelAttribute> {
-    const result = await db.insert(dataModelAttributes).values(attribute).returning();
+  async createDataModelObjectAttribute(attribute: InsertDataModelObjectAttribute): Promise<DataModelObjectAttribute> {
+    const result = await db.insert(dataModelObjectAttributes).values(attribute).returning();
     return result[0];
   }
 
-  async updateDataModelAttribute(id: number, attribute: Partial<InsertDataModelAttribute>): Promise<DataModelAttribute> {
-    const result = await db.update(dataModelAttributes).set(attribute).where(eq(dataModelAttributes.id, id)).returning();
+  async updateDataModelObjectAttribute(id: number, attribute: Partial<InsertDataModelObjectAttribute>): Promise<DataModelObjectAttribute> {
+    const result = await db.update(dataModelObjectAttributes).set(attribute).where(eq(dataModelObjectAttributes.id, id)).returning();
     return result[0];
   }
 
-  async deleteDataModelAttribute(id: number): Promise<void> {
-    await db.delete(dataModelAttributes).where(eq(dataModelAttributes.id, id));
+  async deleteDataModelObjectAttribute(id: number): Promise<void> {
+    await db.delete(dataModelObjectAttributes).where(eq(dataModelObjectAttributes.id, id));
   }
 
   // Data Model Properties

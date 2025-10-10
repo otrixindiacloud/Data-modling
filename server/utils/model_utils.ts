@@ -3,14 +3,14 @@ import type {
   DataModel,
   DataModelLayer,
   DataModelObject,
-  DataModelAttribute,
+  DataModelObjectAttribute,
   DataModelObjectRelationship,
   DataObject,
   Attribute,
   InsertDataObject,
   InsertAttribute,
   InsertDataModelObject,
-  InsertDataModelAttribute,
+  InsertDataModelObjectAttribute,
 } from "@shared/schema";
 import type { AttributeInput, ModelObjectConfigInput, ModelLayer } from "./validation_schemas";
 
@@ -155,7 +155,7 @@ export async function resolveModelFamily(model: DataModelLayer): Promise<ModelFa
 }
 
 export function findDataModelAttributeId(
-  attributes: DataModelAttribute[],
+  attributes: DataModelObjectAttribute[],
   modelId: number,
   modelObjectId: number,
   attributeId: number,
@@ -172,7 +172,7 @@ export interface LayerCreationResult {
   object: DataObject;
   modelObject: DataModelObject;
   attributes: Attribute[];
-  dataModelAttributes: DataModelAttribute[];
+  dataModelAttributes: DataModelObjectAttribute[];
 }
 
 export function mergeLayerConfig(base: ModelObjectConfigInput, override?: ModelObjectConfigInput): ModelObjectConfigInput {
@@ -281,7 +281,7 @@ export async function replicateObjectToLayer(params: {
   modelObjectsCache.get(targetModel.id)!.push(modelObject);
 
   const createdAttributes: Attribute[] = [];
-  const createdDataModelAttributes: DataModelAttribute[] = [];
+  const createdDataModelAttributes: DataModelObjectAttribute[] = [];
 
   for (let index = 0; index < attributeInputs.length; index++) {
     const attributeInput = attributeInputs[index];
@@ -326,7 +326,7 @@ export async function replicateObjectToLayer(params: {
     }
     attributesCache.get(clonedObject.id)!.push(attribute);
 
-    const dataModelAttributePayload: InsertDataModelAttribute = {
+    const dataModelAttributePayload: InsertDataModelObjectAttribute = {
       attributeId: attribute.id,
       modelObjectId: modelObject.id,
       modelId: targetModel.id,
@@ -343,9 +343,9 @@ export async function replicateObjectToLayer(params: {
         originConceptualModelId: conceptualModel.id,
         originConceptualAttributeName: attributeInput.name,
       },
-    } satisfies InsertDataModelAttribute;
+    } satisfies InsertDataModelObjectAttribute;
 
-    const dataModelAttribute = await storage.createDataModelAttribute(dataModelAttributePayload);
+    const dataModelAttribute = await storage.createDataModelObjectAttribute(dataModelAttributePayload);
     createdDataModelAttributes.push(dataModelAttribute);
   }
 

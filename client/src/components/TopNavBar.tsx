@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Menu, ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Menu, ArrowLeft, PanelLeftClose, PanelLeftOpen, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModelerStore } from "@/store/modelerStore";
 import AddDataModelModal from "@/components/modals/AddDataModelModal";
@@ -8,6 +8,7 @@ import LayerNavigator from "@/components/LayerNavigator";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useLocation } from "wouter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function TopNavBar() {
   const {
@@ -23,6 +24,7 @@ export default function TopNavBar() {
   const [location, setLocation] = useLocation();
   const isModelerRoute = location.startsWith("/modeler");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const { user, organization, logout } = useAuth();
 
   const handleBackToModels = () => {
     setLocation("/models");
@@ -42,6 +44,11 @@ export default function TopNavBar() {
 
   const handleFitView = () => {
     window.dispatchEvent(new CustomEvent('canvasFitView'));
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/auth/login");
   };
 
   useEffect(() => {
@@ -165,7 +172,7 @@ export default function TopNavBar() {
 
       </div>
 
-      <div className="flex items-center space-x-1 lg:space-x-3 min-w-0 flex-shrink-0">
+      <div className="flex items-center space-x-2 lg:space-x-3 min-w-0 flex-shrink-0">
         {/* Canvas Controls - hidden on mobile */}
         <div className="hidden lg:flex items-center space-x-1 border-l border-r border-border px-2 lg:px-4">
           <Tooltip>
@@ -272,6 +279,29 @@ export default function TopNavBar() {
 
         {/* Theme Toggle */}
         <ThemeToggle />
+
+        <div className="hidden sm:flex flex-col items-end text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{user?.name ?? user?.email ?? ""}</span>
+          {organization && <span>{organization.name}</span>}
+        </div>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              onClick={handleLogout}
+              aria-label="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Sign out</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
         {isModelerRoute && (
