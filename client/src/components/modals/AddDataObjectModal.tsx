@@ -19,6 +19,9 @@ interface AddDataObjectModalProps {
 }
 
 export default function AddDataObjectModal({ open, onOpenChange }: AddDataObjectModalProps) {
+  // Debug: Log when component renders
+  console.log('[AddDataObjectModal] Component rendered, open:', open);
+  
   const { currentModel, currentLayer } = useModelerStore();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -28,7 +31,7 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
   const [selectedDomain, setSelectedDomain] = useState("");
   const [selectedDataArea, setSelectedDataArea] = useState("");
   const [sourceSystem, setSourceSystem] = useState("");
-  const [targetSystem, setTargetSystem] = useState("Data Lake");
+  const [targetSystem, setTargetSystem] = useState("");
   const [attributes, setAttributes] = useState<Array<{
     name: string;
     conceptualType: string;
@@ -51,6 +54,18 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
     }
   });
 
+  // Fetch systems
+  const { data: systems = [] } = useQuery({
+    queryKey: ["/api/systems"],
+    queryFn: async () => {
+      const response = await fetch("/api/systems");
+      if (!response.ok) {
+        throw new Error(`Failed to fetch systems: ${response.statusText}`);
+      }
+      return response.json();
+    }
+  });
+
   // Fetch data areas for selected domain
   const { data: dataAreas = [], error: dataAreasError } = useQuery({
     queryKey: ["/api/domains", selectedDomain, "areas"],
@@ -66,165 +81,50 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
   });
 
   const createObjectMutation = useMutation({
-    mutationFn: async (objectData: InsertDataObject & { attributes: typeof attributes }) => {
-      const { attributes: attrData, ...objData } = objectData;
-
-      if (!currentModel) {
-        throw new Error("No current model selected");
-      }
-
-      const allModelsResponse = await fetch("/api/models");
-      if (!allModelsResponse.ok) {
-        throw new Error("Failed to load data models");
-      }
-      const allModels = await allModelsResponse.json();
-
-      let modelFamily: any[] = [];
-
-      if (currentModel.layer === "conceptual") {
-        modelFamily = allModels.filter(
-          (model: any) => model.id === currentModel.id || model.parentModelId === currentModel.id,
-        );
-      } else if (currentModel.layer === "logical" || currentModel.layer === "physical") {
-        const conceptualParent = allModels.find(
-          (model: any) => model.id === currentModel.parentModelId && model.layer === "conceptual",
-        );
-
-        if (conceptualParent) {
-          modelFamily = allModels.filter(
-            (model: any) => model.id === conceptualParent.id || model.parentModelId === conceptualParent.id,
-          );
-        } else {
-          modelFamily = [currentModel];
-        }
-      } else {
-        modelFamily = [currentModel];
-      }
-
-      const conceptualModel = modelFamily.find((model: any) => model.layer === "conceptual");
-      const logicalModel = modelFamily.find((model: any) => model.layer === "logical");
-      const physicalModel = modelFamily.find((model: any) => model.layer === "physical");
-
-      if (!conceptualModel || !logicalModel || !physicalModel) {
-        console.error("Model family detection failed:", {
-          currentModel,
-          modelFamily,
-          conceptualModel,
-          logicalModel,
-          physicalModel,
-        });
-        throw new Error(
-          `Model family incomplete - missing conceptual, logical, or physical layer. Found: conceptual=${!!conceptualModel}, logical=${!!logicalModel}, physical=${!!physicalModel}`,
-        );
-      }
-
-      const position = {
-        x: Math.random() * 300 + 50,
-        y: Math.random() * 300 + 50,
-      };
-
-      const filteredAttributes = attrData.filter((attr) => attr.name.trim());
-
-      const payload = {
-        ...objData,
-        modelId: conceptualModel.id,
-        attributes: filteredAttributes.map((attr, index) => ({
-          name: attr.name,
-          conceptualType: attr.conceptualType || null,
-          logicalType: attr.logicalType || null,
-          physicalType: attr.physicalType || null,
-          dataType: attr.logicalType || attr.physicalType || attr.conceptualType || null,
-          nullable: attr.nullable,
-          isPrimaryKey: attr.isPrimaryKey,
-          isForeignKey: attr.isForeignKey,
-          length: attr.length ?? null,
-          orderIndex: index,
-        })),
-        cascade: true,
-        modelObjectConfig: {
-          position,
-          isVisible: true,
-          layerSpecificConfig: {
-            position,
-          },
-        },
-        layerModelObjectConfig: {
-          logical: { position },
-          physical: { position },
-        },
-      };
-
+    mutationFn: async (objectData: any) => {
+      // New API: Creates objects directly in data_model_objects (no data_objects entry)
+      // data_objects table is reserved for system sync only
       const response = await fetch("/api/objects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(objectData),
       });
 
       if (!response.ok) {
-        let details: any = null;
-        try {
-          details = await response.json();
-        } catch (err) {
-          // ignore JSON parse error
-        }
-        throw new Error(`Failed to create object: ${details?.message ?? response.statusText}`);
+        const error = await response.json();
+        throw new Error(error.message || "Failed to create object");
       }
 
-      const cascadeResult = await response.json();
-
-      return { cascadeResult, attributes: filteredAttributes };
+      return response.json();
     },
-    onSuccess: ({ cascadeResult, attributes: createdAttributes }) => {
-      const conceptualLayer = cascadeResult?.layers?.conceptual;
-      const conceptualObject = conceptualLayer?.object ?? cascadeResult?.primaryObject;
-
-      if (!conceptualObject) {
-        console.warn("Cascade response missing conceptual object", cascadeResult);
-        return;
-      }
-
-      window.dispatchEvent(
-        new CustomEvent("objectCreated", {
-          detail: {
-            objectId: conceptualObject.id,
-            name: conceptualObject.name,
-            attributes: createdAttributes,
-            timestamp: new Date(),
-          },
-        }),
-      );
-
-      setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("forceDataRefresh", {
-            detail: { reason: "object_created", objectId: conceptualObject.id },
-          }),
-        );
-      }, 300);
-
-      toast({
-        title: "✓ Object Created Successfully",
-        description: `${conceptualObject.name} has been added to the model with ${createdAttributes.length} attributes.`,
+    onSuccess: (data) => {
+      console.log("Object created successfully:", data);
+      
+      // Invalidate relevant queries - MUST include canvas query to refresh display
+      // Use broader invalidation pattern to catch all canvas queries for this model
+      queryClient.invalidateQueries({ 
+        queryKey: ["/api/models", currentModel?.id],
+        exact: false // This will invalidate all queries starting with this key
       });
-
-      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
       queryClient.invalidateQueries({ queryKey: ["/api/attributes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/domains"] });
       queryClient.invalidateQueries({ queryKey: ["/api/areas"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "canvas"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "objects"] });
-
-      queryClient.refetchQueries({ queryKey: ["/api/objects"] });
-      queryClient.refetchQueries({ queryKey: ["/api/attributes"] });
-
+      
+      toast({
+        title: "✓ Object Created Successfully",
+        description: `${data.modelObject.name} has been added to the model with ${data.attributes.length} attributes.`,
+      });
+      
+      // Reset form and close modal
       resetForm();
       onOpenChange(false);
     },
-    onError: (error: any) => {
+    onError: (error: Error) => {
+      console.error("Error creating object:", error);
       toast({
         title: "Error",
-        description: error?.message ?? "Failed to create object. Please try again.",
+        description: error.message || "Failed to create object. Please try again.",
         variant: "destructive",
       });
     },
@@ -236,7 +136,7 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
     setSelectedDomain("");
     setSelectedDataArea("");
     setSourceSystem("");
-    setTargetSystem("Data Lake");
+    setTargetSystem("");
     setAttributes([
       { name: "", conceptualType: "", logicalType: "", physicalType: "", isPrimaryKey: false, isForeignKey: false, nullable: true }
     ]);
@@ -267,21 +167,60 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
   const handleSubmit = () => {
     if (!objectName.trim() || !currentModel?.id) return;
 
+    // Ensure we're in Conceptual layer with a Conceptual model
+    if (currentLayer !== 'conceptual' || currentModel.layer !== 'conceptual') {
+      toast({
+        title: "Layer Restriction",
+        description: "Objects can only be created in Conceptual layer. Switch to Conceptual layer to add objects.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const selectedDomainObj = domains.find((d: any) => d.id.toString() === selectedDomain);
     const selectedAreaObj = Array.isArray(dataAreas) ? dataAreas.find((a: any) => a.id.toString() === selectedDataArea) : null;
+    
+    // Find system IDs by name
+    const sourceSystemObj = systems.find((s: any) => s.name === sourceSystem);
+    const targetSystemObj = systems.find((s: any) => s.name === targetSystem);
+
+    // Generate random position for the object
+    const position = {
+      x: Math.random() * 300 + 50,
+      y: Math.random() * 300 + 50,
+    };
 
     createObjectMutation.mutate({
       name: objectName,
-      description: description || null,
-      objectType: "entity", // Required field for dataObjects schema
-      modelId: currentModel.id, // Add the required modelId
-      domainId: selectedDomainObj ? selectedDomainObj.id : null,
-      dataAreaId: selectedAreaObj ? selectedAreaObj.id : null,
-      // sourceSystem: sourceSystem || null, // Will be handled via sourceSystemId
-      isNew: true,
-      attributes: attributes.filter(attr => attr.name.trim())
+      description: description || undefined,
+      objectType: "entity",
+      modelId: currentModel.id,
+      domainId: selectedDomainObj ? selectedDomainObj.id : undefined,
+      dataAreaId: selectedAreaObj ? selectedAreaObj.id : undefined,
+      sourceSystemId: sourceSystemObj ? sourceSystemObj.id : undefined,
+      targetSystemId: targetSystemObj ? targetSystemObj.id : undefined,
+      position,
+      attributes: attributes.filter(attr => attr.name.trim()).map((attr, index) => ({
+        name: attr.name,
+        conceptualType: attr.conceptualType || undefined,
+        logicalType: attr.logicalType || undefined,
+        physicalType: attr.physicalType || undefined,
+        dataType: attr.logicalType || attr.physicalType || attr.conceptualType || undefined,
+        nullable: attr.nullable,
+        isPrimaryKey: attr.isPrimaryKey,
+        isForeignKey: attr.isForeignKey,
+        orderIndex: index,
+      }))
     });
   };
+
+  console.log('[AddDataObjectModal] Rendering Dialog, open:', open, 'layer:', currentLayer);
+
+  // CRITICAL: Only render in Conceptual layer and when open
+  // This prevents multiple modals (one per layer) from appearing
+  if (!open || currentLayer !== 'conceptual') {
+    return null;
+  }
 
   return (
     <Dialog open={open} onOpenChange={(open) => {
@@ -315,9 +254,9 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
       >
         <div className="px-6 py-4 border-b bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-lg font-semibold">Add Data Object</DialogTitle>
+            <DialogTitle className="text-lg font-semibold">Add Data Object (Conceptual Layer)</DialogTitle>
             <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
-              Create a new data object for your data model with attributes and relationships.
+              Create a new conceptual data object. Logical and Physical layer objects will be generated from this conceptual object.
             </DialogDescription>
           </DialogHeader>
           {/* Enhanced close button */}
@@ -347,12 +286,45 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
             
             <div className="space-y-2">
               <Label htmlFor="sourceSystem">Source System</Label>
-              <Input
-                id="sourceSystem"
-                value={sourceSystem}
-                onChange={(e) => setSourceSystem(e.target.value)}
-                placeholder="e.g., CRM System, ERP System"
-              />
+              <Select 
+                value={sourceSystem} 
+                onValueChange={setSourceSystem}
+              >
+                <SelectTrigger 
+                  className="focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <SelectValue placeholder="Select source system" />
+                </SelectTrigger>
+                <SelectContent 
+                  className="z-[60] max-h-[200px] overflow-auto"
+                  position="popper"
+                  sideOffset={4}
+                >
+                  {systems.length === 0 ? (
+                    <div className="p-2 text-sm text-gray-500">No systems available</div>
+                  ) : (
+                    systems
+                      .filter((system: any) => system.canBeSource !== false)
+                      .map((system: any) => (
+                        <SelectItem 
+                          key={system.id} 
+                          value={system.id.toString()}
+                          className="focus:bg-blue-50 focus:text-blue-900"
+                        >
+                          <span className="font-medium">{system.name}</span>
+                          {system.category && (
+                            <span className="block text-xs text-gray-500 mt-1">
+                              {system.category}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -530,26 +502,16 @@ export default function AddDataObjectModal({ open, onOpenChange }: AddDataObject
                   position="popper"
                   sideOffset={4}
                 >
-                  <SelectItem value="Data Lake">
-                    <span className="font-medium">Data Lake</span>
-                    <span className="block text-xs text-gray-500">Centralized repository for structured/unstructured data</span>
-                  </SelectItem>
-                  <SelectItem value="Data Warehouse">
-                    <span className="font-medium">Data Warehouse</span>
-                    <span className="block text-xs text-gray-500">Optimized for analytics and reporting</span>
-                  </SelectItem>
-                  <SelectItem value="Operational Database">
-                    <span className="font-medium">Operational Database</span>
-                    <span className="block text-xs text-gray-500">Transaction processing system</span>
-                  </SelectItem>
-                  <SelectItem value="Analytics Platform">
-                    <span className="font-medium">Analytics Platform</span>
-                    <span className="block text-xs text-gray-500">Business intelligence and analytics</span>
-                  </SelectItem>
-                  <SelectItem value="Reporting System">
-                    <span className="font-medium">Reporting System</span>
-                    <span className="block text-xs text-gray-500">Automated reporting and dashboards</span>
-                  </SelectItem>
+                  {systems.filter(s => s.canBeTarget !== false).map((system) => (
+                    <SelectItem key={system.id} value={system.name}>
+                      <span className="font-medium">{system.name}</span>
+                      {system.category && (
+                        <span className="block text-xs text-gray-500">
+                          {system.category}
+                        </span>
+                      )}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

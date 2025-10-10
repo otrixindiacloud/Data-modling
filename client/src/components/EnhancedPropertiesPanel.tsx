@@ -76,7 +76,7 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
   const [activeTab, setActiveTab] = useState("properties");
   const [isAddingAttribute, setIsAddingAttribute] = useState(false);
   const [editingAttributeId, setEditingAttributeId] = useState<number | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["basic", "attributes"]));
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["basic", "domain", "system", "attributes"]));
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -236,6 +236,108 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
     enabled: !!selectedObjectId
   });
 
+  // Fetch domains for LOV
+  const { data: domains = [] } = useQuery({
+    queryKey: ["/api/domains"],
+    queryFn: async () => {
+      const response = await fetch("/api/domains");
+      return response.json();
+    }
+  });
+
+  // Fetch data areas for LOV
+  const { data: dataAreas = [] } = useQuery({
+    queryKey: ["/api/data-areas"],
+    queryFn: async () => {
+      const response = await fetch("/api/data-areas");
+      return response.json();
+    }
+  });
+
+  // Fetch systems for LOV
+  const { data: systems = [] } = useQuery({
+    queryKey: ["/api/systems"],
+    queryFn: async () => {
+      const response = await fetch("/api/systems");
+      return response.json();
+    }
+  });
+
+  // State for editing object properties
+  const [isEditingObject, setIsEditingObject] = useState(false);
+  const [objectForm, setObjectForm] = useState({
+    name: "",
+    description: "",
+    objectType: "entity",
+    domainId: null as number | null,
+    dataAreaId: null as number | null,
+    sourceSystemId: null as number | null,
+    targetSystemId: null as number | null,
+  });
+
+  // Update object form when selectedObject changes
+  useEffect(() => {
+    if (selectedObject) {
+      setObjectForm({
+        name: selectedObject.name || "",
+        description: selectedObject.description || "",
+        objectType: selectedObject.objectType || "entity",
+        domainId: selectedObject.domainId || null,
+        dataAreaId: selectedObject.dataAreaId || null,
+        sourceSystemId: selectedObject.sourceSystemId || null,
+        targetSystemId: selectedObject.targetSystemId || null,
+      });
+    }
+  }, [selectedObject]);
+
+  // Update object mutation
+  const updateObjectMutation = useMutation({
+    mutationFn: async (data: typeof objectForm) => {
+      const response = await fetch(`/api/objects/${selectedObjectId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      if (!response.ok) throw new Error("Failed to update object");
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Object updated successfully"
+      });
+      setIsEditingObject(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/objects", selectedObjectId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update object",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const handleSaveObject = () => {
+    updateObjectMutation.mutate(objectForm);
+  };
+
+  const handleCancelEdit = () => {
+    if (selectedObject) {
+      setObjectForm({
+        name: selectedObject.name || "",
+        description: selectedObject.description || "",
+        objectType: selectedObject.objectType || "entity",
+        domainId: selectedObject.domainId || null,
+        dataAreaId: selectedObject.dataAreaId || null,
+        sourceSystemId: selectedObject.sourceSystemId || null,
+        targetSystemId: selectedObject.targetSystemId || null,
+      });
+    }
+    setIsEditingObject(false);
+  };
+
   // Add attribute mutation
   const addAttributeMutation = useMutation({
     mutationFn: async (data: AttributeFormData) => {
@@ -344,7 +446,7 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
     setIsAddingAttribute(true);
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelAttributeEdit = () => {
     setIsAddingAttribute(false);
     setEditingAttributeId(null);
     setAttributeForm(initialAttributeForm);
@@ -530,6 +632,43 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
           <TabsContent value="properties" className="flex-1 min-h-0 overflow-hidden px-4 pb-4 pt-2">
             <div className="h-full min-h-0 pr-3 overflow-y-auto">
               <div className="space-y-4">
+                {/* Action Buttons */}
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-medium">Object Details</h3>
+                  {!isEditingObject ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsEditingObject(true)}
+                      className="h-7 text-xs"
+                    >
+                      <Edit3 className="h-3 w-3 mr-1" />
+                      Edit
+                    </Button>
+                  ) : (
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCancelEdit}
+                        className="h-7 text-xs"
+                      >
+                        <X className="h-3 w-3 mr-1" />
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleSaveObject}
+                        className="h-7 text-xs"
+                        disabled={updateObjectMutation.isPending}
+                      >
+                        <Save className="h-3 w-3 mr-1" />
+                        Save
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Basic Properties */}
                 <div className="border border-border rounded-lg">
                   <Button
@@ -551,7 +690,9 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
                         <Label htmlFor="object-name" className="text-xs font-medium">Name</Label>
                         <Input
                           id="object-name"
-                          value={selectedObject.name}
+                          value={isEditingObject ? objectForm.name : selectedObject.name}
+                          onChange={(e) => isEditingObject && setObjectForm({ ...objectForm, name: e.target.value })}
+                          disabled={!isEditingObject}
                           className="h-8 text-sm"
                           data-testid="input-object-name"
                         />
@@ -561,7 +702,9 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
                         <Label htmlFor="object-description" className="text-xs font-medium">Description</Label>
                         <Textarea
                           id="object-description"
-                          value={selectedObject.description || ""}
+                          value={isEditingObject ? objectForm.description : (selectedObject.description || "")}
+                          onChange={(e) => isEditingObject && setObjectForm({ ...objectForm, description: e.target.value })}
+                          disabled={!isEditingObject}
                           placeholder="Add a description..."
                           className="text-sm min-h-[60px]"
                           data-testid="textarea-object-description"
@@ -570,7 +713,11 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
                       
                       <div className="space-y-2">
                         <Label htmlFor="object-type" className="text-xs font-medium">Object Type</Label>
-                        <Select value={selectedObject.objectType || "table"}>
+                        <Select 
+                          value={isEditingObject ? objectForm.objectType : (selectedObject.objectType || "entity")}
+                          onValueChange={(value) => isEditingObject && setObjectForm({ ...objectForm, objectType: value })}
+                          disabled={!isEditingObject}
+                        >
                           <SelectTrigger className="h-8 text-sm" data-testid="select-object-type">
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
@@ -581,6 +728,78 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
                             <SelectItem value="interface">Interface</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Domain & Data Area */}
+                <div className="border border-border rounded-lg">
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-between p-3 h-auto"
+                    onClick={() => toggleSection("domain")}
+                  >
+                    <span className="text-sm font-medium">Domain & Data Area</span>
+                    {expandedSections.has("domain") ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </Button>
+                  
+                  {expandedSections.has("domain") && (
+                    <div className="border-t border-border p-4 space-y-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="domain" className="text-xs font-medium">Domain</Label>
+                        <Select
+                          value={isEditingObject ? (objectForm.domainId?.toString() || "none") : (selectedObject.domainId?.toString() || "none")}
+                          onValueChange={(value) => isEditingObject && setObjectForm({ ...objectForm, domainId: value === "none" ? null : parseInt(value) })}
+                          disabled={!isEditingObject}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Select domain" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Domain</SelectItem>
+                            {domains.map((domain: any) => (
+                              <SelectItem key={domain.id} value={domain.id.toString()}>
+                                {domain.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!isEditingObject && selectedObject.domainName && (
+                          <p className="text-xs text-muted-foreground">
+                            Current: {selectedObject.domainName}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="data-area" className="text-xs font-medium">Data Area</Label>
+                        <Select
+                          value={isEditingObject ? (objectForm.dataAreaId?.toString() || "none") : (selectedObject.dataAreaId?.toString() || "none")}
+                          onValueChange={(value) => isEditingObject && setObjectForm({ ...objectForm, dataAreaId: value === "none" ? null : parseInt(value) })}
+                          disabled={!isEditingObject}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Select data area" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No Data Area</SelectItem>
+                            {dataAreas.map((area: any) => (
+                              <SelectItem key={area.id} value={area.id.toString()}>
+                                {area.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!isEditingObject && selectedObject.dataAreaName && (
+                          <p className="text-xs text-muted-foreground">
+                            Current: {selectedObject.dataAreaName}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -603,19 +822,46 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
                   
                   {expandedSections.has("system") && (
                     <div className="border-t border-border p-4 space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-medium">Source System</Label>
-                          <Badge variant="outline" className="text-xs">
-                            {selectedObject.sourceSystemId ? "Connected" : "Not Set"}
-                          </Badge>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs font-medium">Target System</Label>
-                          <Badge variant="outline" className="text-xs">
-                            {selectedObject.targetSystemId ? "Connected" : "Not Set"}
-                          </Badge>
-                        </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="source-system" className="text-xs font-medium">Source System</Label>
+                        <Select
+                          value={isEditingObject ? (objectForm.sourceSystemId?.toString() || "none") : (selectedObject.sourceSystemId?.toString() || "none")}
+                          onValueChange={(value) => isEditingObject && setObjectForm({ ...objectForm, sourceSystemId: value === "none" ? null : parseInt(value) })}
+                          disabled={!isEditingObject}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Select source system" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No System</SelectItem>
+                            {systems.map((system: any) => (
+                              <SelectItem key={system.id} value={system.id.toString()}>
+                                {system.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="target-system" className="text-xs font-medium">Target System</Label>
+                        <Select
+                          value={isEditingObject ? (objectForm.targetSystemId?.toString() || "none") : (selectedObject.targetSystemId?.toString() || "none")}
+                          onValueChange={(value) => isEditingObject && setObjectForm({ ...objectForm, targetSystemId: value === "none" ? null : parseInt(value) })}
+                          disabled={!isEditingObject}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Select target system" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No System</SelectItem>
+                            {systems.map((system: any) => (
+                              <SelectItem key={system.id} value={system.id.toString()}>
+                                {system.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                   )}
@@ -960,7 +1206,7 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
             <div className="flex justify-end space-x-2 pt-4">
               <Button
                 variant="outline"
-                onClick={handleCancelEdit}
+                onClick={handleCancelAttributeEdit}
                 data-testid="button-cancel-attribute"
               >
                 Cancel

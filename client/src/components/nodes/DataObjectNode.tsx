@@ -12,6 +12,19 @@ function DataObjectNode({ data, selected }: NodeProps<CanvasNode["data"]>) {
   const { currentLayer, selectNode, selectAttribute, selectedAttributeId } = useModelerStore();
   const isMobile = useIsMobile();
   
+  // DEBUG: Log what data the node receives
+  React.useEffect(() => {
+    console.log('🎨 DataObjectNode rendered with data:', {
+      name: data?.name,
+      objectId: data?.objectId,
+      modelObjectId: data?.modelObjectId,
+      domain: data?.domain,
+      dataArea: data?.dataArea,
+      hasAttributes: !!data?.attributes,
+      attributeCount: data?.attributes?.length || 0
+    });
+  }, [data]);
+  
   // Enhanced touch handling for mobile devices
   const [touchStart, setTouchStart] = React.useState<{ x: number; y: number; time: number } | null>(null);
   const [isLongPress, setIsLongPress] = React.useState(false);
@@ -20,10 +33,12 @@ function DataObjectNode({ data, selected }: NodeProps<CanvasNode["data"]>) {
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     // Double-click selects the node and triggers opening properties panel on any device
-    const nodeId = data.objectId.toString();
-    selectNode(nodeId);
-    // Dispatch a custom event to open the properties panel
-    window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+    const nodeId = (data.modelObjectId || data.objectId)?.toString();
+    if (nodeId) {
+      selectNode(nodeId);
+      // Dispatch a custom event to open the properties panel
+      window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+    }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -47,9 +62,11 @@ function DataObjectNode({ data, selected }: NodeProps<CanvasNode["data"]>) {
       }
       
       // Trigger properties panel on long press
-      const nodeId = data.objectId.toString();
-      selectNode(nodeId);
-      window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+      const nodeId = (data.modelObjectId || data.objectId)?.toString();
+      if (nodeId) {
+        selectNode(nodeId);
+        window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+      }
     }, 500); // 500ms for long press
   };
 
@@ -84,9 +101,11 @@ function DataObjectNode({ data, selected }: NodeProps<CanvasNode["data"]>) {
     // Handle double tap (under 300ms and not a long press)
     if (timeDiff < 300 && !isLongPress) {
       // Check for rapid successive taps (double tap)
-      const nodeId = data.objectId.toString();
-      selectNode(nodeId);
-      window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+      const nodeId = (data.modelObjectId || data.objectId)?.toString();
+      if (nodeId) {
+        selectNode(nodeId);
+        window.dispatchEvent(new CustomEvent('openMobileProperties', { detail: { nodeId: nodeId } }));
+      }
     }
     
     setTouchStart(null);

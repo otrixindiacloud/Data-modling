@@ -114,8 +114,8 @@ export default function DataModelingToolbar({
 
   return (
     <>
-      {/* Compact Toolbar Button */}
-      <div className="absolute top-4 left-4 z-10">
+      {/* Compact Toolbar Button with Save Status Indicator */}
+      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         <DropdownMenu open={isToolboxOpen} onOpenChange={setIsToolboxOpen}>
           <DropdownMenuTrigger asChild>
             <Button
@@ -323,6 +323,39 @@ export default function DataModelingToolbar({
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
+        
+        {/* Auto-Save Status - Always visible */}
+        <div className={`
+          px-3 py-1.5 rounded-md shadow-sm backdrop-blur-md border text-xs font-medium 
+          flex items-center gap-1.5 transition-all duration-200
+          ${saveStatus === 'saving' || saveStatus === 'saved'
+            ? 'bg-green-50/90 border-green-300 text-green-700 dark:bg-green-950/90'
+            : 'bg-gray-50/90 border-gray-300 text-gray-600 dark:bg-gray-900/90 dark:text-gray-400'
+          }
+        `}>
+          <div className={`w-2 h-2 rounded-full ${
+            saveStatus === 'saving' ? 'bg-yellow-500 animate-pulse' 
+            : saveStatus === 'saved' ? 'bg-green-500 animate-pulse'
+            : 'bg-gray-400'
+          }`}></div>
+          <span>Auto-save: {saveStatus === 'saving' ? 'SAVING' : saveStatus === 'saved' ? 'SAVED' : 'Ready'}</span>
+        </div>
+        
+        {/* Save Status Indicator - Visible outside dropdown */}
+        {saveStatus !== 'idle' && (
+          <div className={`
+            px-3 py-2 rounded-md shadow-md backdrop-blur-md border-2 text-sm font-medium
+            transition-all duration-200 flex items-center gap-2
+            ${saveStatus === 'saving' ? 'bg-yellow-50/95 border-yellow-300 text-yellow-700 dark:bg-yellow-950/95' 
+              : saveStatus === 'saved' ? 'bg-green-50/95 border-green-300 text-green-700 dark:bg-green-950/95 animate-pulse'
+              : saveStatus === 'error' ? 'bg-red-50/95 border-red-300 text-red-700 dark:bg-red-950/95'
+              : ''
+            }
+          `}>
+            <Save className={`h-4 w-4 ${saveStatus === 'saving' ? 'animate-spin' : ''}`} />
+            <span>{getSaveStatusText()}</span>
+          </div>
+        )}
       </div>
     </>
   );

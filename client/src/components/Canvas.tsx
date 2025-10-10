@@ -1,4 +1,3 @@
-
 import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import ReactFlow, {
@@ -11,7 +10,7 @@ import ReactFlow, {
   Controls,
   MiniMap,
   Background,
-  Connection,
+  Connect3ion,
   NodeTypes,
   ReactFlowProvider,
 } from "reactflow";
@@ -34,7 +33,6 @@ import MiniMapOverlay from "./MiniMapOverlay";
 import AISuggestionsPanel from "./AISuggestionsPanel";
 import AttributeRelationshipModal from "./modals/AttributeRelationshipModal";
 import EditRelationshipModal from "./modals/EditRelationshipModal";
-import AddDataObjectModal from "./modals/AddDataObjectModal";
 import DataModelingToolbar from "./Canvas/DataModelingToolbar";
 import RelationshipPreview from "./Canvas/RelationshipPreview";
 import LayerNavigator from "./LayerNavigator";
@@ -74,8 +72,6 @@ const nodeTypes: NodeTypes = {
 };
 
 function CanvasComponent() {
-  console.log('🎨 CanvasComponent MOUNTED/RENDERED');
-  
   // Initialize touch performance optimizations
   useTouchPerformance();
   const deviceCapabilities = useDeviceCapabilities();
@@ -87,20 +83,20 @@ function CanvasComponent() {
     setNodes: setStoreNodes,
     setEdges: setStoreEdges,
     selectNode, 
-  selectEdge, 
-  selectObject,
-  saveToHistory,
-  currentModel,
-  setCurrentModel,
-  allModels,
-  setAllModels,
-  requireModelBeforeAction,
-  currentLayer,
-  getCurrentLayerModel: storeGetCurrentLayerModel,
-  history,
-  undo,
-  redo,
-  clearHistory
+    selectEdge, 
+    selectObject,
+    saveToHistory,
+    currentModel,
+    setCurrentModel,
+    allModels,
+    setAllModels,
+    requireModelBeforeAction,
+    currentLayer,
+    getCurrentLayerModel: storeGetCurrentLayerModel,
+    history,
+    undo,
+    redo,
+    clearHistory
   } = useModelerStore();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -112,26 +108,28 @@ function CanvasComponent() {
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
   const [connectionMode, setConnectionMode] = useState<'selection' | 'connection'>('selection');
-  
+
   // Debug connection mode changes
   useEffect(() => {
     console.log("Connection mode changed to:", connectionMode);
   }, [connectionMode]);
-  const [pendingConnection, setPendingConnection] = useState<{ 
-    source: string; 
-    target: string;
-    sourceHandle?: string | null;
-    targetHandle?: string | null;
-  } | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{ source: string; target: string } | null>(null);
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
   const [relationshipType, setRelationshipType] = useState<'1:1' | '1:N' | 'N:M'>('1:N');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [showAddObjectModal, setShowAddObjectModal] = useState(false);
   const [showAISuggestions, setShowAISuggestions] = useState(false);
   const [showMobileGestures, setShowMobileGestures] = useState(false);
   const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showAutoLayout, setShowAutoLayout] = useState(false);
-  
+
+  // Debug: Log save status changes
+  useEffect(() => {
+    console.log('🔔 ========== SAVE STATUS CHANGED ==========');
+    console.log('🔔 New status:', saveStatus);
+    console.log('🔔 Time:', new Date().toLocaleTimeString());
+    console.log('🔔 Stack trace:', new Error().stack);
+  }, [saveStatus]);
+
   // New state for attribute relationship modal
   const [showAttributeRelationshipModal, setShowAttributeRelationshipModal] = useState(false);
   const [attributeConnection, setAttributeConnection] = useState<{
@@ -198,8 +196,11 @@ function CanvasComponent() {
   // Mutation for saving node positions with enhanced error handling
   const savePositionsMutation = useMutation({
     mutationFn: async ({ positions, modelId, layer }: SavePositionsPayload) => {
-      console.log('🚀 savePositionsMutation called:', { positions, modelId, layer });
-      setSaveStatus('saving');
+      console.log('🚀 ========== MUTATION FUNCTION CALLED ==========');
+      console.log('🚀 Positions:', positions);
+      console.log('🚀 Model ID:', modelId);
+      console.log('🚀 Layer:', layer);
+      console.log('🚀 Time:', new Date().toLocaleTimeString());
 
       const response = await fetch(`/api/models/${modelId}/canvas/positions`, {
         method: 'POST',
@@ -212,23 +213,33 @@ function CanvasComponent() {
         }),
       });
 
-      console.log('📡 Server response:', { status: response.status, ok: response.ok });
+      console.log('📡 ========== SERVER RESPONSE RECEIVED ==========');
+      console.log('📡 Status:', response.status);
+      console.log('📡 OK:', response.ok);
+      console.log('📡 Time:', new Date().toLocaleTimeString());
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Save failed:', errorText);
+        console.error('❌ ========== SAVE FAILED ==========');
+        console.error('❌ Error:', errorText);
         throw new Error(`Failed to save positions: ${response.status} ${errorText}`);
       }
 
       const result = await response.json();
-      console.log('✅ Save successful:', result);
+      console.log('✅ ========== SAVE SUCCESSFUL ==========');
+      console.log('✅ Result:', result);
       return result;
     },
     onSuccess: (_, variables) => {
-      console.log('✨ onSuccess called');
+      console.log('✨ ========== ON SUCCESS CALLBACK ==========');
+      console.log('✨ Setting status to "saved"');
+      console.log('✨ Time:', new Date().toLocaleTimeString());
       setSaveStatus('saved');
       // Clear saved status after 2 seconds
-      setTimeout(() => setSaveStatus('idle'), 2000);
+      setTimeout(() => {
+        console.log('🔄 Resetting save status to idle');
+        setSaveStatus('idle');
+      }, 2000);
 
       // Invalidate and refetch canvas data to ensure consistency
       queryClient.invalidateQueries({
@@ -236,8 +247,9 @@ function CanvasComponent() {
       });
     },
     onError: (error) => {
-      console.error('💥 onError called:', error);
-      console.error('Failed to save positions:', error);
+      console.error('💥 ========== ON ERROR CALLBACK ==========');
+      console.error('💥 Error:', error);
+      console.error('💥 Time:', new Date().toLocaleTimeString());
       setSaveStatus('error');
       // Clear error status after 5 seconds
       setTimeout(() => setSaveStatus('idle'), 5000);
@@ -369,14 +381,25 @@ function CanvasComponent() {
     if (canvasData && canvasData.nodes && canvasData.edges) {
       console.log('📥 Loading canvas data:', canvasData.nodes.length, 'nodes,', canvasData.edges.length, 'edges');
       
-      // DEBUG: Check if nodes have modelObjectId
+      // DEBUG: Check complete node structure
       canvasData.nodes.forEach((node: any, index: number) => {
-        console.log(`🔍 Node ${index}:`, {
+        console.log(`🔍 Node ${index} FULL DATA:`, {
           id: node.id,
-          name: node.data?.name,
-          modelObjectId: node.data?.modelObjectId,
-          objectId: node.data?.objectId,
-          position: node.position
+          type: node.type,
+          position: node.position,
+          data: {
+            name: node.data?.name,
+            domain: node.data?.domain,
+            domainName: node.data?.domainName,
+            dataArea: node.data?.dataArea,
+            dataAreaName: node.data?.dataAreaName,
+            sourceSystem: node.data?.sourceSystem,
+            targetSystem: node.data?.targetSystem,
+            modelObjectId: node.data?.modelObjectId,
+            objectId: node.data?.objectId,
+            attributes: node.data?.attributes?.length || 0,
+            isNew: node.data?.isNew
+          }
         });
       });
       
@@ -829,10 +852,24 @@ function CanvasComponent() {
     };
   }, [nodes, currentLayerModel, currentModel, currentLayer, setNodes, screenToFlowPosition, queryClient, saveToHistory, toast, requireModelBeforeAction]);
 
+  // Handle Add Object - ONLY allowed in Conceptual layer
+  const handleAddObject = useCallback(() => {
+    if (currentLayer !== 'conceptual') {
+      toast({
+        title: "Layer Restriction",
+        description: "Objects can only be added in the Conceptual layer. Logical and Physical objects are generated from Conceptual objects.",
+        variant: "destructive",
+      });
+      return;
+    }
+    // Dispatch event for parent to handle
+    window.dispatchEvent(new CustomEvent('openAddObjectModalConfirmed'));
+  }, [currentLayer, toast]);
+
   // Handle gesture events
   useEffect(() => {
     const handleOpenAddObjectModal = () => {
-      setShowAddObjectModal(true);
+      handleAddObject();
     };
 
     window.addEventListener('openAddObjectModal', handleOpenAddObjectModal);
@@ -840,10 +877,158 @@ function CanvasComponent() {
     return () => {
       window.removeEventListener('openAddObjectModal', handleOpenAddObjectModal);
     };
-  }, []);
+  }, [handleAddObject]);
 
   // Enhanced onNodesChange handler with robust position saving
   const savePositionsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const queuePositionSave = useCallback((reason: string, debugInfo?: Record<string, unknown>) => {
+    const modelId = currentLayerModel?.id || currentModel?.id;
+    console.log('🗂️ queuePositionSave invoked', {
+      reason,
+      debugInfo,
+      modelId,
+      currentLayer,
+      hasPendingMutation: savePositionsMutation.isPending
+    });
+
+    if (!modelId) {
+      console.warn('🚫 queuePositionSave aborted - no model id available', { reason, currentLayer });
+      return;
+    }
+
+    // Clear any existing timeout to debounce rapid updates
+    if (savePositionsTimeoutRef.current) {
+      console.log('⏱️ queuePositionSave clearing existing timeout', { reason });
+      clearTimeout(savePositionsTimeoutRef.current);
+    }
+
+    savePositionsTimeoutRef.current = setTimeout(() => {
+      console.log('⏰ queuePositionSave timeout fired', {
+        reason,
+        time: new Date().toLocaleTimeString(),
+        modelId,
+        layer: currentLayer
+      });
+
+      if (savePositionsMutation.isPending) {
+        console.log('⏸️ queuePositionSave detected pending mutation, skipping', { reason });
+        return;
+      }
+
+      setSaveStatus('saving');
+
+      setNodes(currentNodes => {
+        console.log('📦 queuePositionSave evaluating nodes', { reason, nodeCount: currentNodes.length });
+
+        const validNodes = currentNodes.filter(node => {
+          const data = node.data || {};
+          const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
+          const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
+          const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
+
+          const isValid = (
+            hasIdentifier &&
+            node.position &&
+            typeof node.position.x === 'number' &&
+            typeof node.position.y === 'number' &&
+            !isNaN(node.position.x) &&
+            !isNaN(node.position.y)
+          );
+
+          if (!isValid && node.id) {
+            console.warn('⚠️ queuePositionSave filtered invalid node', {
+              reason,
+              id: node.id,
+              name: node.data?.name,
+              hasIdentifier,
+              modelObjectId,
+              objectId,
+              position: node.position
+            });
+          }
+
+          return isValid;
+        });
+
+        console.log('✅ queuePositionSave valid nodes', { reason, validCount: validNodes.length });
+
+        if (validNodes.length === 0) {
+          console.warn('❌ queuePositionSave found no valid nodes to save', { reason });
+          setSaveStatus('idle');
+          return currentNodes;
+        }
+
+        const positions = validNodes.map(node => {
+          const data = node.data || {};
+          const payload: {
+            modelObjectId?: number;
+            objectId?: number;
+            position: { x: number; y: number };
+          } = {
+            position: {
+              x: Math.round(node.position.x * 100) / 100,
+              y: Math.round(node.position.y * 100) / 100,
+            }
+          };
+
+          if (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) {
+            payload.modelObjectId = data.modelObjectId;
+          }
+
+          if (typeof data.objectId === 'number' && data.objectId > 0) {
+            payload.objectId = data.objectId;
+          }
+
+          console.log('📍 queuePositionSave payload entry', {
+            reason,
+            nodeId: node.id,
+            nodeName: node.data?.name,
+            payload
+          });
+
+          return payload;
+        });
+
+        const targetModelId = currentLayerModel?.id || currentModel?.id;
+
+        console.log('🎯 queuePositionSave final payload', {
+          reason,
+          positionsCount: positions.length,
+          targetModelId,
+          layer: currentLayer,
+          isPending: savePositionsMutation.isPending
+        });
+
+        if (positions.length > 0 && targetModelId && !savePositionsMutation.isPending) {
+          console.log('✅ queuePositionSave dispatching mutation', {
+            reason,
+            targetModelId,
+            positionsCount: positions.length
+          });
+
+          savePositionsMutation.mutate({
+            positions,
+            modelId: targetModelId,
+            layer: currentLayer,
+          });
+        } else if (savePositionsMutation.isPending) {
+          console.log('⏸️ queuePositionSave detected concurrent mutation, resetting status', { reason });
+          setSaveStatus('idle');
+        } else {
+          console.error('❌ queuePositionSave missing requirements', {
+            reason,
+            positionsCount: positions.length,
+            targetModelId,
+            layer: currentLayer
+          });
+          setSaveStatus('idle');
+        }
+
+        return currentNodes;
+      });
+    }, 300);
+  }, [currentLayer, currentLayerModel?.id, currentModel?.id, savePositionsMutation, setNodes, setSaveStatus]);
   
   const handleNodesChange = useCallback((changes: any[]) => {
     console.log('🚨 handleNodesChange CALLED - TOP OF FUNCTION');
@@ -863,16 +1048,20 @@ function CanvasComponent() {
     
     // Check if any position changes occurred (when dragging is complete)
     const positionChanges = changes.filter(change => {
-      const isPositionChange = change.type === 'position' && !change.dragging;
+      // ReactFlow position changes: dragging can be true, false, or undefined
+      // We want to capture when dragging stops (dragging === false or undefined after a drag)
+      const isPositionChange = change.type === 'position' && change.dragging !== true;
       
       if (change.type === 'position') {
         console.log('   🔍 Position change details:', {
           id: change.id,
           type: change.type,
           dragging: change.dragging,
+          typeOfDragging: typeof change.dragging,
+          isDraggingNotTrue: change.dragging !== true,
+          willBeSaved: isPositionChange,
           hasPosition: !!change.position,
-          position: change.position,
-          fullChange: change
+          position: change.position
         });
       }
       
@@ -881,6 +1070,7 @@ function CanvasComponent() {
     
     console.log('📍 Position changes detected:', {
       count: positionChanges.length,
+      willTriggerAutoSave: positionChanges.length > 0 && !!currentModel?.id,
       changes: positionChanges.map(c => ({ id: c.id, position: c.position }))
     });
     
@@ -900,122 +1090,13 @@ function CanvasComponent() {
         });
       }, 200); // Slightly longer delay to avoid conflicts
     }
-    
-    if (positionChanges.length > 0 && currentModel?.id) {
-      console.log('💾 AUTO-SAVE: Starting position save process');
-      
-      // AUTO-SAVE: Show saving indicator immediately when dragging ends
-      setSaveStatus('saving');
-      
-      // Clear existing timeout to debounce multiple rapid changes
-      if (savePositionsTimeoutRef.current) {
-        console.log('⏱️ Clearing existing timeout');
-        clearTimeout(savePositionsTimeoutRef.current);
-      }
-      
-      // Debounce position saving to avoid excessive API calls (reduced from 500ms to 300ms for faster response)
-      savePositionsTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ Timeout fired, starting save...');
-        setNodes(currentNodes => {
-          console.log('📦 Current nodes count:', currentNodes.length);
-          
-          // Filter out nodes without identifiers and ensure data integrity
-          const validNodes = currentNodes.filter(node => {
-            const data = node.data || {};
-            const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
-            const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
-            const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
-
-            const isValid = (
-              hasIdentifier &&
-              node.position &&
-              typeof node.position.x === 'number' &&
-              typeof node.position.y === 'number' &&
-              !isNaN(node.position.x) &&
-              !isNaN(node.position.y)
-            );
-            
-            if (!isValid && node.id) {
-              console.warn('⚠️ Invalid node filtered out:', {
-                id: node.id,
-                name: node.data?.name,
-                hasIdentifier,
-                modelObjectId,
-                objectId,
-                position: node.position
-              });
-            }
-            
-            return isValid;
-          });
-          
-          console.log('✅ Valid nodes for save:', validNodes.length);
-          
-          if (validNodes.length === 0) {
-            console.warn('❌ No valid nodes to save!');
-            return currentNodes;
-          }
-          
-          const positions = validNodes.map(node => {
-            const data = node.data || {};
-            const payload: {
-              modelObjectId?: number;
-              objectId?: number;
-              position: { x: number; y: number };
-            } = {
-              position: {
-                x: Math.round(node.position.x * 100) / 100, // Round to 2 decimal places
-                y: Math.round(node.position.y * 100) / 100
-              }
-            };
-
-            if (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) {
-              payload.modelObjectId = data.modelObjectId;
-            }
-
-            if (typeof data.objectId === 'number' && data.objectId > 0) {
-              payload.objectId = data.objectId;
-            }
-
-            console.log('📍 Position payload for node:', {
-              nodeId: node.id,
-              nodeName: node.data?.name,
-              payload
-            });
-
-            return payload;
-          });
-          
-          const targetModelId = currentLayerModel?.id || currentModel?.id;
-
-          console.log('🎯 Saving positions:', {
-            positionsCount: positions.length,
-            targetModelId,
-            layer: currentLayer,
-            positions
-          });
-
-          // Only save if we have valid positions and current layer model exists
-          if (positions.length > 0 && targetModelId) {
-            savePositionsMutation.mutate({
-              positions,
-              modelId: targetModelId,
-              layer: currentLayer,
-            });
-          } else {
-            console.error('❌ Cannot save - missing requirements:', {
-              positionsCount: positions.length,
-              targetModelId,
-              layer: currentLayer
-            });
-          }
-          
-          return currentNodes;
-        });
-      }, 300); // Save after 300ms of no changes (reduced for faster auto-save)
+    if (positionChanges.length > 0) {
+      console.log('💾 queuePositionSave triggered from handleNodesChange');
+      queuePositionSave('nodes_change');
     }
   }, [
     onNodesChange,
+    queuePositionSave,
     currentModel?.id,
     currentLayerModel?.id,
     currentLayer,
@@ -1024,8 +1105,7 @@ function CanvasComponent() {
     setEdges,
     isDataLoading,
     history.length,
-    savePositionsMutation.mutate,
-    setSaveStatus
+    isDataLoading
   ]);
 
   // Cleanup timeout on unmount and force save if needed
@@ -1675,11 +1755,11 @@ function CanvasComponent() {
           data: {
             name: object.name,
             objectId: object.id,
-            domain: object.domainName || 'Uncategorized',
-            dataArea: object.dataAreaName || 'General',
+            domain: object.domainName || object.domain || 'Uncategorized',
+            dataArea: object.dataAreaName || object.dataArea || null,
             attributes: object.attributes || [],
-            sourceSystem: object.sourceSystem,
-            targetSystem: object.targetSystem,
+            sourceSystem: object.sourceSystem || null,
+            targetSystem: object.targetSystem || null,
             isNew: object.isNew || false
           }
         };
@@ -2123,7 +2203,7 @@ function CanvasComponent() {
           });
         }}
         currentLayer={currentLayer}
-        onAddObject={() => setShowAddObjectModal(true)}
+        onAddObject={handleAddObject}
         showAISuggestions={showAISuggestions}
         onToggleAISuggestions={() => setShowAISuggestions(!showAISuggestions)}
         onToggleSearch={() => setShowSearchPanel(true)}
@@ -2378,12 +2458,6 @@ function CanvasComponent() {
         edge={editingEdge}
         onUpdate={handleUpdateRelationship}
         onDelete={handleDeleteRelationship}
-      />
-
-      {/* Add Data Object Modal */}
-      <AddDataObjectModal
-        open={showAddObjectModal}
-        onOpenChange={setShowAddObjectModal}
       />
     </main>
   );

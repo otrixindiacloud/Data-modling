@@ -405,15 +405,83 @@ export default function PropertiesPanel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/objects", validSelectedNode?.data?.objectId, "attributes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
-      // Invalidate canvas to refresh node after attribute deletion
+      // Invalidate canvas to refresh node with removed attribute
       queryClient.invalidateQueries({ queryKey: ["/api/models", currentModel?.id, "canvas"] });
 
       toast({
         title: "✓ Attribute Deleted",
-        description: "The attribute has been removed successfully."
+        description: "The attribute has been removed."
       });
     },
   });
+
+  // Generate logical object mutation (Conceptual → Logical)
+  const generateLogicalMutation = useMutation({
+    mutationFn: async () => {
+      if (!validSelectedNode?.data?.objectId) {
+        throw new Error("No valid object selected");
+      }
+      return apiRequest("POST", `/api/objects/${validSelectedNode.data.objectId}/generate-logical`, {});
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
+      // Invalidate all canvas views
+      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
+      
+      toast({
+        title: "✓ Logical Object Generated",
+        description: `Successfully created logical object "${data.data?.createdObject?.name}" from conceptual object.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "❌ Failed to Generate Logical Object",
+        description: error.message || "Could not generate logical object. Make sure a logical model exists.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Generate physical object mutation (Logical → Physical)
+  const generatePhysicalMutation = useMutation({
+    mutationFn: async () => {
+      if (!validSelectedNode?.data?.objectId) {
+        throw new Error("No valid object selected");
+      }
+      return apiRequest("POST", `/api/objects/${validSelectedNode.data.objectId}/generate-physical`, {});
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/objects"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
+      // Invalidate all canvas views
+      queryClient.invalidateQueries({ queryKey: ["/api/models"] });
+      
+      toast({
+        title: "✓ Physical Object Generated",
+        description: `Successfully created physical object "${data.data?.createdObject?.name}" from logical object.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "❌ Failed to Generate Physical Object",
+        description: error.message || "Could not generate physical object. Make sure a physical model exists.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleGenerateLogical = () => {
+    if (confirm("Generate a logical object from this conceptual object? This will create a new object in the logical layer with all attributes.")) {
+      generateLogicalMutation.mutate();
+    }
+  };
+
+  const handleGeneratePhysical = () => {
+    if (confirm("Generate a physical object from this logical object? This will create a new object in the physical layer with all attributes.")) {
+      generatePhysicalMutation.mutate();
+    }
+  };
 
   const handleObjectUpdate = (field: string, value: any) => {
     console.log('handleObjectUpdate called:', field, value);
@@ -790,6 +858,63 @@ export default function PropertiesPanel() {
                         {validSelectedNode.data.sourceSystem}
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {/* Layer Generation Actions */}
+                {currentLayer === "conceptual" && (
+                  <div className="pt-2 border-t">
+                    <Label className="text-xs font-medium text-muted-foreground mb-2 block">Layer Actions</Label>
+                    <Button
+                      onClick={handleGenerateLogical}
+                      disabled={generateLogicalMutation.isPending}
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                    >
+                      {generateLogicalMutation.isPending ? (
+                        <>
+                          <div className="h-4 w-4 mr-2 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Layers className="h-4 w-4 mr-2" />
+                          Generate Logical Object
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                      Create a logical model object based on this conceptual object with type mappings
+                    </p>
+                  </div>
+                )}
+
+                {currentLayer === "logical" && (
+                  <div className="pt-2 border-t">
+                    <Label className="text-xs font-medium text-muted-foreground mb-2 block">Layer Actions</Label>
+                    <Button
+                      onClick={handleGeneratePhysical}
+                      disabled={generatePhysicalMutation.isPending}
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                    >
+                      {generatePhysicalMutation.isPending ? (
+                        <>
+                          <div className="h-4 w-4 mr-2 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <DbIcon className="h-4 w-4 mr-2" />
+                          Generate Physical Object
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                      Create a physical model object based on this logical object with database types
+                    </p>
                   </div>
                 )}
               </CardContent>

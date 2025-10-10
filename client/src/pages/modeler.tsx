@@ -8,6 +8,7 @@ import EnhancedPropertiesPanel from "@/components/EnhancedPropertiesPanel";
 import UXFixesManager from "@/components/UXFixesManager";
 import ExportModal from "@/components/modals/ExportModal";
 import AddDataSourceModal from "@/components/modals/AddDataSourceModal";
+import AddDataObjectModal from "@/components/modals/AddDataObjectModal";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Settings, Menu, Database, ChevronRight } from "lucide-react";
@@ -69,6 +70,7 @@ export default function ModelerPage() {
   const [showMobileDataSources, setShowMobileDataSources] = useState(false);
   const [dataExplorerCollapsed, setDataExplorerCollapsed] = useState(false);
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [showAddObjectModal, setShowAddObjectModal] = useState(false);
   const { widths, updateWidths } = usePanelWidths();
   const [showModelRequiredModal, setShowModelRequiredModal] = useState(false);
   const [modelRequiredMessage, setModelRequiredMessage] = useState<string | null>(null);
@@ -242,6 +244,18 @@ export default function ModelerPage() {
     window.addEventListener('openMobileProperties', handleOpenMobileProperties as EventListener);
     return () => {
       window.removeEventListener('openMobileProperties', handleOpenMobileProperties as EventListener);
+    };
+  }, []);
+
+  // Listen for Add Data Object modal trigger from Canvas
+  useEffect(() => {
+    const handleOpenAddObjectModal = () => {
+      setShowAddObjectModal(true);
+    };
+
+    window.addEventListener('openAddObjectModalConfirmed', handleOpenAddObjectModal);
+    return () => {
+      window.removeEventListener('openAddObjectModalConfirmed', handleOpenAddObjectModal);
     };
   }, []);
 
@@ -496,6 +510,10 @@ export default function ModelerPage() {
       {/* Modals */}
       <ExportModal />
       <AddDataSourceModal />
+      <AddDataObjectModal 
+        open={showAddObjectModal} 
+        onOpenChange={setShowAddObjectModal}
+      />
     </div>
   );
 }

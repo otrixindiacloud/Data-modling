@@ -53,10 +53,20 @@ export const dataObjects = pgTable("data_objects", {
 });
 
 // Data Model Objects - Objects within specific models with layer-specific configurations
+// NOTE: objectId is nullable - NULL for user-created objects, NOT NULL for system-synced objects
 export const dataModelObjects = pgTable("data_model_objects", {
   id: serial("id").primaryKey(),
-  objectId: integer("object_id").references(() => dataObjects.id).notNull(),
+  objectId: integer("object_id").references(() => dataObjects.id), // NULL for user-created objects
   modelId: integer("model_id").references(() => dataModels.id).notNull(),
+  
+  // Object definition fields (required for user-created objects, duplicated for system-synced)
+  name: text("name"), // Required when objectId is NULL
+  description: text("description"),
+  objectType: text("object_type"),
+  domainId: integer("domain_id").references(() => dataDomains.id),
+  dataAreaId: integer("data_area_id").references(() => dataAreas.id),
+  sourceSystemId: integer("source_system_id").references(() => systems.id),
+  
   targetSystemId: integer("target_system_id").references(() => systems.id), // Target system for this object in this model
   position: jsonb("position").$type<{ x: number; y: number }>(),
   metadata: jsonb("metadata").$type<Record<string, any>>(),
@@ -90,11 +100,21 @@ export const attributes = pgTable("data_object_attributes", {
 });
 
 // Data Model Attributes - Attributes within specific models and objects with layer-specific properties
+// NOTE: attributeId is nullable - NULL for user-created attributes, NOT NULL for system-synced attributes
 export const dataModelAttributes = pgTable("data_model_attributes", {
   id: serial("id").primaryKey(),
-  attributeId: integer("attribute_id").references(() => attributes.id).notNull(),
+  attributeId: integer("attribute_id").references(() => attributes.id), // NULL for user-created attributes
   modelObjectId: integer("model_object_id").references(() => dataModelObjects.id).notNull(),
   modelId: integer("model_id").references(() => dataModels.id).notNull(),
+  
+  // Attribute definition fields (required for user-created attributes, duplicated for system-synced)
+  name: text("name"), // Required when attributeId is NULL
+  description: text("description"),
+  dataType: text("data_type"), // Base data type
+  length: integer("length"),
+  precision: integer("precision"),
+  scale: integer("scale"),
+  
   conceptualType: text("conceptual_type"), // "Text", "Number", "Date", etc.
   logicalType: text("logical_type"), // "VARCHAR", "INTEGER", "DATE", etc.
   physicalType: text("physical_type"), // "VARCHAR(255)", "INT", "DATETIME", etc.
