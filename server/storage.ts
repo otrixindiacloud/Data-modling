@@ -1,9 +1,11 @@
 import {
   dataModels,
+  dataModelLayers,
   dataDomains,
   dataAreas,
   dataObjects,
   dataModelObjects,
+  dataModelLayerObjects,
   attributes,
   dataModelAttributes,
   dataModelProperties,
@@ -17,6 +19,10 @@ import {
   capabilitySystemMappings,
   type DataModel,
   type InsertDataModel,
+  type DataModelLayer,
+  type InsertDataModelLayer,
+  type DataModelLayerObject,
+  type InsertDataModelLayerObject,
   type DataDomain,
   type InsertDataDomain,
   type DataArea,
@@ -64,12 +70,24 @@ export interface CapabilitySystemMappingDetail {
 }
 
 export interface IStorage {
-  // Data Models
+  // Data Models (parent table)
   getDataModels(): Promise<DataModel[]>;
   getDataModel(id: number): Promise<DataModel | undefined>;
   createDataModel(model: InsertDataModel): Promise<DataModel>;
   updateDataModel(id: number, model: Partial<InsertDataModel>): Promise<DataModel>;
   deleteDataModel(id: number): Promise<void>;
+
+  // Data Model Layers (child table - Flow, Conceptual, Logical, Physical)
+  getDataModelLayers(): Promise<DataModelLayer[]>;
+  getDataModelLayer(id: number): Promise<DataModelLayer | undefined>;
+  createDataModelLayer(layer: InsertDataModelLayer): Promise<DataModelLayer>;
+  updateDataModelLayer(id: number, layer: Partial<InsertDataModelLayer>): Promise<DataModelLayer>;
+  deleteDataModelLayer(id: number): Promise<void>;
+
+  // Data Model Layer ↔ Object mappings
+  getLayerObjectLinksByLayer(layerId: number): Promise<DataModelLayerObject[]>;
+  linkDataModelObjectToLayer(link: InsertDataModelLayerObject): Promise<DataModelLayerObject>;
+  unlinkDataModelObjectFromLayer(layerId: number, objectId: number): Promise<void>;
 
   // Data Domains
   getDataDomains(): Promise<DataDomain[]>;
@@ -93,8 +111,7 @@ export interface IStorage {
   getAllDataObjects(): Promise<DataObject[]>;
   getDataObject(id: number): Promise<DataObject | undefined>;
   getDataObjectsByModel(modelId: number): Promise<DataObject[]>;
-  getDataObjectsBySourceSystem(systemId: number): Promise<DataObject[]>;
-  getDataObjectsByTargetSystem(systemId: number): Promise<DataObject[]>;
+  getDataObjectsBySystem(systemId: number): Promise<DataObject[]>;
   createDataObject(object: InsertDataObject): Promise<DataObject>;
   updateDataObject(id: number, object: Partial<InsertDataObject>): Promise<DataObject>;
   deleteDataObject(id: number): Promise<void>;
@@ -206,6 +223,174 @@ export class Storage implements IStorage {
     await db.delete(dataModels).where(eq(dataModels.id, id));
   }
 
+  // Data Model Layers (child table - Flow, Conceptual, Logical, Physical)
+  async getDataModelLayers(): Promise<DataModelLayer[]> {
+    return await db.select().from(dataModelLayers);
+  }
+
+  async getDataModelLayer(id: number): Promise<DataModelLayer | undefined> {
+    const result = await db.select().from(dataModelLayers).where(eq(dataModelLayers.id, id));
+    return result[0];
+  }
+
+  async createDataModelLayer(layer: InsertDataModelLayer): Promise<DataModelLayer> {
+    const { dataModelId: providedDataModelId, ...layerData } = layer;
+
+    let dataModelId = providedDataModelId ?? null;
+
+    if (!dataModelId) {
+      // Auto-create parent data model if not provided
+      const modelInsert = await db
+        .insert(dataModels)
+        .values({
+          name: layerData.name,
+          targetSystemId: layerData.targetSystemId ?? null,
+          domainId: layerData.domainId ?? null,
+          dataAreaId: layerData.dataAreaId ?? null,
+        })
+        .returning();
+
+      dataModelId = modelInsert[0]?.id ?? null;
+    } else {
+      // Keep the parent model metadata loosely in sync when explicit values are provided
+      const modelUpdates: Partial<DataModel> = {};
+      if (layerData.targetSystemId !== undefined) {
+        modelUpdates.targetSystemId = layerData.targetSystemId;
+      }
+      if (layerData.domainId !== undefined) {
+        modelUpdates.domainId = layerData.domainId;
+      }
+      if (layerData.dataAreaId !== undefined) {
+        modelUpdates.dataAreaId = layerData.dataAreaId;
+      }
+      if (Object.keys(modelUpdates).length > 0) {
+        await db
+          .update(dataModels)
+          .set({
+            ...modelUpdates,
+            updatedAt: new Date(),
+          })
+          .where(eq(dataModels.id, dataModelId));
+      }
+    }
+
+    if (!dataModelId) {
+      throw new Error("Failed to resolve data model for layer creation");
+    }
+
+    const result = await db
+      .insert(dataModelLayers)
+      .values({
+        ...layerData,
+        dataModelId,
+      })
+      .returning();
+
+    return result[0];
+  }
+
+  async updateDataModelLayer(id: number, layer: Partial<InsertDataModelLayer>): Promise<DataModelLayer> {
+    const existing = await this.getDataModelLayer(id);
+    if (!existing) {
+      throw new Error(`Data model layer ${id} not found`);
+    }
+
+    // Keep the parent model metadata loosely in sync
+    const modelUpdates: Partial<DataModel> = {};
+    if (layer.name !== undefined && existing.layer === "flow") {
+      modelUpdates.name = layer.name;
+    }
+    if (layer.targetSystemId !== undefined) {
+      modelUpdates.targetSystemId = layer.targetSystemId;
+    }
+    if (layer.domainId !== undefined) {
+      modelUpdates.domainId = layer.domainId;
+    }
+    if (layer.dataAreaId !== undefined) {
+      modelUpdates.dataAreaId = layer.dataAreaId;
+    }
+    if (Object.keys(modelUpdates).length > 0) {
+      if (existing.dataModelId) {
+        await db
+          .update(dataModels)
+          .set({
+            ...modelUpdates,
+            updatedAt: new Date(),
+          })
+          .where(eq(dataModels.id, existing.dataModelId));
+      }
+    }
+
+    const result = await db
+      .update(dataModelLayers)
+      .set({
+        ...layer,
+        updatedAt: new Date(),
+      })
+      .where(eq(dataModelLayers.id, id))
+      .returning();
+
+    return result[0];
+  }
+
+  async deleteDataModelLayer(id: number): Promise<void> {
+    const existing = await this.getDataModelLayer(id);
+    if (!existing) {
+      return;
+    }
+
+    await db.delete(dataModelLayers).where(eq(dataModelLayers.id, id));
+
+    // Check if this was the last layer in the parent model
+    const siblings = await db
+      .select()
+      .from(dataModelLayers)
+      .where(eq(dataModelLayers.dataModelId, existing.dataModelId));
+
+    if (siblings.length === 0) {
+      await db.delete(dataModels).where(eq(dataModels.id, existing.dataModelId));
+    }
+  }
+
+  // Data Model Layer ↔ Object mappings
+  async getLayerObjectLinksByLayer(layerId: number): Promise<DataModelLayerObject[]> {
+    return await db
+      .select()
+      .from(dataModelLayerObjects)
+      .where(eq(dataModelLayerObjects.dataModelLayerId, layerId));
+  }
+
+  async linkDataModelObjectToLayer(link: InsertDataModelLayerObject): Promise<DataModelLayerObject> {
+    // Check if link already exists
+    const existing = await db
+      .select()
+      .from(dataModelLayerObjects)
+      .where(
+        and(
+          eq(dataModelLayerObjects.dataModelLayerId, link.dataModelLayerId),
+          eq(dataModelLayerObjects.dataModelObjectId, link.dataModelObjectId)
+        )
+      );
+
+    if (existing.length > 0) {
+      return existing[0];
+    }
+
+    const result = await db.insert(dataModelLayerObjects).values(link).returning();
+    return result[0];
+  }
+
+  async unlinkDataModelObjectFromLayer(layerId: number, objectId: number): Promise<void> {
+    await db
+      .delete(dataModelLayerObjects)
+      .where(
+        and(
+          eq(dataModelLayerObjects.dataModelLayerId, layerId),
+          eq(dataModelLayerObjects.dataModelObjectId, objectId)
+        )
+      );
+  }
+
   // Data Domains
   async getDataDomains(): Promise<DataDomain[]> {
     return await db.select().from(dataDomains);
@@ -304,29 +489,58 @@ export class Storage implements IStorage {
     await db.delete(dataModelObjects).where(eq(dataModelObjects.objectId, objectId));
   }
 
+  private async ensureLayerMappingsForModelObject(modelObject: DataModelObject): Promise<void> {
+    const layerRecord = await db
+      .select({
+        id: dataModelLayers.id,
+        dataModelId: dataModelLayers.dataModelId,
+      })
+      .from(dataModelLayers)
+      .where(eq(dataModelLayers.id, modelObject.modelId))
+      .limit(1);
+
+    const baseLayer = layerRecord[0];
+    if (!baseLayer) {
+      return;
+    }
+
+    const siblingLayers = await db
+      .select({ id: dataModelLayers.id })
+      .from(dataModelLayers)
+      .where(eq(dataModelLayers.dataModelId, baseLayer.dataModelId));
+
+    if (siblingLayers.length === 0) {
+      return;
+    }
+
+    const timestamp = new Date();
+
+    await db
+      .insert(dataModelLayerObjects)
+      .values(
+        siblingLayers.map((layer) => ({
+          dataModelLayerId: layer.id,
+          dataModelObjectId: modelObject.id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }))
+      )
+      .onConflictDoNothing({
+        target: [dataModelLayerObjects.dataModelLayerId, dataModelLayerObjects.dataModelObjectId],
+      });
+  }
+
   async getDataObjectsByModel(modelId: number): Promise<DataObject[]> {
     const result = await db
-      .select({
-        id: dataObjects.id,
-        name: dataObjects.name,
-        description: dataObjects.description,
-        domainId: dataObjects.domainId,
-        dataAreaId: dataObjects.dataAreaId,
-        createdAt: dataObjects.createdAt,
-        updatedAt: dataObjects.updatedAt
-      })
+      .select({ dataObject: dataObjects })
       .from(dataObjects)
       .innerJoin(dataModelObjects, eq(dataObjects.id, dataModelObjects.objectId))
       .where(eq(dataModelObjects.modelId, modelId));
-    return result;
+    return result.map((row) => row.dataObject);
   }
 
-  async getDataObjectsBySourceSystem(systemId: number): Promise<DataObject[]> {
-    return await db.select().from(dataObjects).where(eq(dataObjects.sourceSystemId, systemId));
-  }
-
-  async getDataObjectsByTargetSystem(systemId: number): Promise<DataObject[]> {
-    return await db.select().from(dataObjects).where(eq(dataObjects.targetSystemId, systemId));
+  async getDataObjectsBySystem(systemId: number): Promise<DataObject[]> {
+    return await db.select().from(dataObjects).where(eq(dataObjects.systemId, systemId));
   }
 
   // Data Model Objects
@@ -335,7 +549,52 @@ export class Storage implements IStorage {
   }
 
   async getDataModelObjectsByModel(modelId: number): Promise<DataModelObject[]> {
-    return await db.select().from(dataModelObjects).where(eq(dataModelObjects.modelId, modelId));
+    const linkedObjects = await db
+      .select({
+        dataModelObject: dataModelObjects,
+      })
+      .from(dataModelLayerObjects)
+      .innerJoin(
+        dataModelObjects,
+        eq(dataModelLayerObjects.dataModelObjectId, dataModelObjects.id)
+      )
+      .where(eq(dataModelLayerObjects.dataModelLayerId, modelId));
+
+    const resolveTime = (value: Date | null | undefined): number => {
+      if (!value) {
+        return 0;
+      }
+      return value instanceof Date ? value.getTime() : new Date(value).getTime();
+    };
+
+    const byObjectKey = new Map<string | number, DataModelObject>();
+
+    for (const entry of linkedObjects) {
+      const modelObject = entry.dataModelObject;
+      const key = modelObject.objectId ?? `model-${modelObject.id}`;
+      const existing = byObjectKey.get(key);
+
+      if (!existing) {
+        byObjectKey.set(key, modelObject);
+        continue;
+      }
+
+      const modelObjectMatchesLayer = modelObject.modelId === modelId;
+      const existingMatchesLayer = existing.modelId === modelId;
+
+      if (modelObjectMatchesLayer && !existingMatchesLayer) {
+        byObjectKey.set(key, modelObject);
+        continue;
+      }
+
+      if (modelObjectMatchesLayer === existingMatchesLayer) {
+        if (resolveTime(modelObject.updatedAt) > resolveTime(existing.updatedAt)) {
+          byObjectKey.set(key, modelObject);
+        }
+      }
+    }
+
+    return Array.from(byObjectKey.values());
   }
 
   async getDataModelObject(id: number): Promise<DataModelObject | undefined> {
@@ -344,8 +603,40 @@ export class Storage implements IStorage {
   }
 
   async createDataModelObject(object: InsertDataModelObject): Promise<DataModelObject> {
-    const result = await db.insert(dataModelObjects).values(object).returning();
-    return result[0];
+    // If objectId is provided and name/description are not, fetch from data_objects
+    let enrichedObject = { ...object };
+    
+    if (object.objectId && (!object.name || !object.description)) {
+      const dataObject = await this.getDataObject(object.objectId);
+      if (dataObject) {
+        if (!enrichedObject.name) {
+          enrichedObject.name = dataObject.name;
+        }
+        if (!enrichedObject.description) {
+          enrichedObject.description = dataObject.description;
+        }
+        if (!enrichedObject.objectType) {
+          enrichedObject.objectType = dataObject.objectType;
+        }
+        if (!enrichedObject.domainId) {
+          enrichedObject.domainId = dataObject.domainId;
+        }
+        if (!enrichedObject.dataAreaId) {
+          enrichedObject.dataAreaId = dataObject.dataAreaId;
+        }
+      }
+    }
+
+    const result = await db.insert(dataModelObjects).values(enrichedObject).returning();
+    const created = result[0];
+
+    if (!created) {
+      throw new Error("Failed to create data model object");
+    }
+
+    await this.ensureLayerMappingsForModelObject(created);
+
+    return created;
   }
 
   async updateDataModelObject(id: number, object: Partial<InsertDataModelObject>): Promise<DataModelObject> {

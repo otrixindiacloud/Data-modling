@@ -125,7 +125,7 @@ export default function ModelerPage() {
       return;
     }
 
-    const validLayers: ModelLayer[] = ["conceptual", "logical", "physical"];
+  const validLayers: ModelLayer[] = ["flow", "conceptual", "logical", "physical"];
     if (!validLayers.includes(pendingLayer)) {
       window.sessionStorage.removeItem("modeler:pendingLayer");
       window.sessionStorage.removeItem("modeler:pendingModelId");
@@ -267,7 +267,7 @@ export default function ModelerPage() {
     setPropertiesCollapsed((prev) => !prev);
   };
 
-  const handleLayerChange = (layer: "conceptual" | "logical" | "physical") => {
+    const handleLayerChange = (layer: ModelLayer) => {
     setCurrentLayer(layer);
     console.log("Layer changed to:", layer);
   };

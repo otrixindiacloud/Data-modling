@@ -61,7 +61,7 @@ export async function createUserObject(
   const validated = userObjectInputSchema.parse(input);
 
   // Get model to determine layer
-  const model = await storage.getDataModel(validated.modelId);
+  const model = await storage.getDataModelLayer(validated.modelId);
   if (!model) {
     throw new Error(`Model with ID ${validated.modelId} not found`);
   }

@@ -35,8 +35,7 @@ export interface ObjectLakeObject {
   objectType: string | null;
   domain: ObjectLakeDomain | null;
   dataArea: ObjectLakeArea | null;
-  sourceSystem: ObjectLakeSystem | null;
-  targetSystem: ObjectLakeSystem | null;
+  system: ObjectLakeSystem | null;
   baseModel: ObjectLakeModel | null;
   baseMetadata: {
     position?: Record<string, unknown> | null;

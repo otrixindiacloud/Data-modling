@@ -90,7 +90,7 @@ export interface AISuggestion {
   action: () => void;
 }
 
-export type ModelLayer = "conceptual" | "logical" | "physical";
+export type ModelLayer = "flow" | "conceptual" | "logical" | "physical";
 
 export interface ExportOptions {
   format: "json" | "sql_ddl" | "quicksql";

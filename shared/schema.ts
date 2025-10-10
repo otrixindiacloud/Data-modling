@@ -1,13 +1,43 @@
-import { pgTable, text, serial, integer, boolean, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, jsonb, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Data Models
+// Systems - Unified source and target systems
+export const systems = pgTable("systems", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  category: text("category").notNull(), // System category like "ERP", "CRM", "Data Lake", etc.
+  type: text("type").notNull(), // Connection type: "sql", "file", "adls", "api", etc.
+  description: text("description"),
+  connectionString: text("connection_string"),
+  configuration: jsonb("configuration").$type<Record<string, any>>(),
+  status: text("status").default("disconnected"), // "connected", "disconnected", "error"
+  colorCode: text("color_code").default("#6366f1"), // Default indigo color
+  canBeSource: boolean("can_be_source").default(true), // Can this system be a data source?
+  canBeTarget: boolean("can_be_target").default(true), // Can this system be a data target?
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Data Models (parent table - one record per model group)
 export const dataModels = pgTable("data_models", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  layer: text("layer").notNull(), // "conceptual" | "logical" | "physical"
+  description: text("description"),
+  targetSystemId: integer("target_system_id").references(() => systems.id),
+  domainId: integer("domain_id").references(() => dataDomains.id),
+  dataAreaId: integer("data_area_id").references(() => dataAreas.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Data Model Layers (child table - 4 layers per model: Flow, Conceptual, Logical, Physical)
+export const dataModelLayers = pgTable("data_model_layers", {
+  id: serial("id").primaryKey(),
+  dataModelId: integer("data_model_id").references(() => dataModels.id).notNull(),
+  name: text("name").notNull(),
+  layer: text("layer").notNull(), // "flow" | "conceptual" | "logical" | "physical"
   parentModelId: integer("parent_model_id"), // Links layers together
   targetSystemId: integer("target_system_id").references(() => systems.id), // Reference to target system
   domainId: integer("domain_id").references(() => dataDomains.id),
@@ -37,11 +67,9 @@ export const dataAreas = pgTable("data_areas", {
 export const dataObjects = pgTable("data_objects", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  modelId: integer("model_id").references(() => dataModels.id).notNull(), // Current DB has this
   domainId: integer("domain_id").references(() => dataDomains.id),
   dataAreaId: integer("data_area_id").references(() => dataAreas.id),
-  sourceSystemId: integer("source_system_id").references(() => systems.id), // Reference to source system
-  targetSystemId: integer("target_system_id").references(() => systems.id), // Reference to target system
+  systemId: integer("system_id").references(() => systems.id),
   position: jsonb("position").$type<{ x: number; y: number }>(), // Current DB has this
   metadata: jsonb("metadata").$type<Record<string, any>>(), // Current DB has this
   isNew: boolean("is_new").default(false), // Track newly added objects
@@ -57,7 +85,7 @@ export const dataObjects = pgTable("data_objects", {
 export const dataModelObjects = pgTable("data_model_objects", {
   id: serial("id").primaryKey(),
   objectId: integer("object_id").references(() => dataObjects.id), // NULL for user-created objects
-  modelId: integer("model_id").references(() => dataModels.id).notNull(),
+  modelId: integer("model_id").references(() => dataModelLayers.id).notNull(),
   
   // Object definition fields (required for user-created objects, duplicated for system-synced)
   name: text("name"), // Required when objectId is NULL
@@ -75,6 +103,27 @@ export const dataModelObjects = pgTable("data_model_objects", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const dataModelLayerObjects = pgTable(
+  "data_model_layer_objects",
+  {
+    id: serial("id").primaryKey(),
+    dataModelLayerId: integer("data_model_layer_id")
+      .references(() => dataModelLayers.id, { onDelete: "cascade" })
+      .notNull(),
+    dataModelObjectId: integer("data_model_object_id")
+      .references(() => dataModelObjects.id, { onDelete: "cascade" })
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    layerObjectUnique: uniqueIndex("data_model_layer_objects_unique").on(
+      table.dataModelLayerId,
+      table.dataModelObjectId,
+    ),
+  })
+);
 
 // Data Object Attributes (Columns/Fields) - Attributes with object associations
 export const attributes = pgTable("data_object_attributes", {
@@ -179,22 +228,6 @@ export const dataModelObjectRelationships = pgTable("data_model_object_relations
 });
 
 // Systems - Unified source and target systems
-export const systems = pgTable("systems", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull().unique(),
-  category: text("category").notNull(), // System category like "ERP", "CRM", "Data Lake", etc.
-  type: text("type").notNull(), // Connection type: "sql", "file", "adls", "api", etc.
-  description: text("description"),
-  connectionString: text("connection_string"),
-  configuration: jsonb("configuration").$type<Record<string, any>>(),
-  status: text("status").default("disconnected"), // "connected", "disconnected", "error"
-  colorCode: text("color_code").default("#6366f1"), // Default indigo color
-  canBeSource: boolean("can_be_source").default(true), // Can this system be a data source?
-  canBeTarget: boolean("can_be_target").default(true), // Can this system be a data target?
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
 // Color Themes - Smart color palette themes for data models
 export const colorThemes = pgTable("color_themes", {
   id: serial("id").primaryKey(),
@@ -387,24 +420,60 @@ export const configurations = pgTable("configurations", {
 
 // Relations
 export const systemsRelations = relations(systems, ({ many }) => ({
-  sourceDataModels: many(dataModels, { relationName: "targetSystem" }),
+  sourceDataModelLayers: many(dataModelLayers, { relationName: "targetSystem" }),
   sourceDataObjects: many(dataObjects, { relationName: "sourceSystem" }),
   targetDataObjects: many(dataObjects, { relationName: "targetSystem" }),
   targetModelObjects: many(dataModelObjects, { relationName: "targetSystem" }),
+  dataModels: many(dataModels),
   capabilitySystemMappings: many(capabilitySystemMappings),
   capabilityModelSystemMappings: many(capabilityModelSystemMappings),
   dataModelSystemMappings: many(dataModelSystemMappings),
 }));
 
-export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
+// Relations for Data Model Layers (child table)
+export const dataModelLayersRelations = relations(dataModelLayers, ({ many, one }) => ({
   modelObjects: many(dataModelObjects),
   modelAttributes: many(dataModelAttributes),
   relationships: many(dataModelObjectRelationships),
   properties: many(dataModelProperties),
+  layerObjectLinks: many(dataModelLayerObjects),
+  targetSystem: one(systems, {
+    fields: [dataModelLayers.targetSystemId],
+    references: [systems.id],
+    relationName: "targetSystem"
+  }),
+  domain: one(dataDomains, {
+    fields: [dataModelLayers.domainId],
+    references: [dataDomains.id],
+  }),
+  dataArea: one(dataAreas, {
+    fields: [dataModelLayers.dataAreaId],
+    references: [dataAreas.id],
+  }),
+  dataModel: one(dataModels, {
+    fields: [dataModelLayers.dataModelId],
+    references: [dataModels.id],
+  }),
+  parentModel: one(dataModelLayers, {
+    fields: [dataModelLayers.parentModelId],
+    references: [dataModelLayers.id],
+    relationName: "parentModel"
+  }),
+  childModels: many(dataModelLayers, {
+    relationName: "parentModel"
+  }),
+  capabilityMappings: many(capabilityDataModelMappings),
+  capabilityModelSystemMappings: many(capabilityModelSystemMappings),
+  systemMappings: many(dataModelSystemMappings),
+  lifecycleAssignments: many(modelLifecycleAssignments),
+}));
+
+// Relations for Data Models (parent table)
+export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
+  layers: many(dataModelLayers),
   targetSystem: one(systems, {
     fields: [dataModels.targetSystemId],
     references: [systems.id],
-    relationName: "targetSystem"
   }),
   domain: one(dataDomains, {
     fields: [dataModels.domainId],
@@ -414,23 +483,12 @@ export const dataModelsRelations = relations(dataModels, ({ many, one }) => ({
     fields: [dataModels.dataAreaId],
     references: [dataAreas.id],
   }),
-  parentModel: one(dataModels, {
-    fields: [dataModels.parentModelId],
-    references: [dataModels.id],
-    relationName: "parentModel"
-  }),
-  childModels: many(dataModels, {
-    relationName: "parentModel"
-  }),
-  capabilityMappings: many(capabilityDataModelMappings),
-  capabilityModelSystemMappings: many(capabilityModelSystemMappings),
-  systemMappings: many(dataModelSystemMappings),
-  lifecycleAssignments: many(modelLifecycleAssignments),
 }));
 
 export const dataDomainsRelations = relations(dataDomains, ({ many }) => ({
   dataAreas: many(dataAreas),
   dataModels: many(dataModels),
+  dataModelLayers: many(dataModelLayers),
   dataObjects: many(dataObjects),
 }));
 
@@ -440,6 +498,7 @@ export const dataAreasRelations = relations(dataAreas, ({ one, many }) => ({
     references: [dataDomains.id],
   }),
   dataModels: many(dataModels),
+  dataModelLayers: many(dataModelLayers),
   dataObjects: many(dataObjects),
 }));
 
@@ -452,15 +511,9 @@ export const dataObjectsRelations = relations(dataObjects, ({ one, many }) => ({
     fields: [dataObjects.dataAreaId],
     references: [dataAreas.id],
   }),
-  sourceSystem: one(systems, {
-    fields: [dataObjects.sourceSystemId],
+  system: one(systems, {
+    fields: [dataObjects.systemId],
     references: [systems.id],
-    relationName: "sourceSystem"
-  }),
-  targetSystem: one(systems, {
-    fields: [dataObjects.targetSystemId],
-    references: [systems.id],
-    relationName: "targetSystem"
   }),
   sourceRelationships: many(dataObjectRelationships, {
     relationName: "sourceDataObject",
@@ -476,10 +529,11 @@ export const dataModelObjectsRelations = relations(dataModelObjects, ({ one, man
     fields: [dataModelObjects.objectId],
     references: [dataObjects.id],
   }),
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [dataModelObjects.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
+  layerLinks: many(dataModelLayerObjects),
   targetSystem: one(systems, {
     fields: [dataModelObjects.targetSystemId],
     references: [systems.id],
@@ -491,6 +545,17 @@ export const dataModelObjectsRelations = relations(dataModelObjects, ({ one, man
   }),
   targetRelationships: many(dataModelObjectRelationships, {
     relationName: "targetModelObject",
+  }),
+}));
+
+export const dataModelLayerObjectsRelations = relations(dataModelLayerObjects, ({ one }) => ({
+  layer: one(dataModelLayers, {
+    fields: [dataModelLayerObjects.dataModelLayerId],
+    references: [dataModelLayers.id],
+  }),
+  modelObject: one(dataModelObjects, {
+    fields: [dataModelLayerObjects.dataModelObjectId],
+    references: [dataModelObjects.id],
   }),
 }));
 
@@ -507,16 +572,16 @@ export const dataModelAttributesRelations = relations(dataModelAttributes, ({ on
     fields: [dataModelAttributes.modelObjectId],
     references: [dataModelObjects.id],
   }),
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [dataModelAttributes.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
 }));
 
 export const dataModelPropertiesRelations = relations(dataModelProperties, ({ one }) => ({
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [dataModelProperties.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
 }));
 
@@ -560,9 +625,9 @@ export const dataModelObjectRelationshipsRelations = relations(dataModelObjectRe
     fields: [dataModelObjectRelationships.targetAttributeId],
     references: [dataModelAttributes.id],
   }),
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [dataModelObjectRelationships.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
 }));
 
@@ -621,9 +686,9 @@ export const capabilityDataModelMappingsRelations = relations(capabilityDataMode
     fields: [capabilityDataModelMappings.capabilityId],
     references: [businessCapabilities.id],
   }),
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [capabilityDataModelMappings.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
   domain: one(dataDomains, {
     fields: [capabilityDataModelMappings.domainId],
@@ -640,9 +705,9 @@ export const capabilityModelSystemMappingsRelations = relations(capabilityModelS
     fields: [capabilityModelSystemMappings.capabilityId],
     references: [businessCapabilities.id],
   }),
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [capabilityModelSystemMappings.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
   system: one(systems, {
     fields: [capabilityModelSystemMappings.systemId],
@@ -651,9 +716,9 @@ export const capabilityModelSystemMappingsRelations = relations(capabilityModelS
 }));
 
 export const dataModelSystemMappingsRelations = relations(dataModelSystemMappings, ({ one }) => ({
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [dataModelSystemMappings.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
   system: one(systems, {
     fields: [dataModelSystemMappings.systemId],
@@ -667,9 +732,9 @@ export const modelLifecyclePhasesRelations = relations(modelLifecyclePhases, ({ 
 }));
 
 export const modelLifecycleAssignmentsRelations = relations(modelLifecycleAssignments, ({ one }) => ({
-  model: one(dataModels, {
+  modelLayer: one(dataModelLayers, {
     fields: [modelLifecycleAssignments.modelId],
-    references: [dataModels.id],
+    references: [dataModelLayers.id],
   }),
   phase: one(modelLifecyclePhases, {
     fields: [modelLifecycleAssignments.phaseId],
@@ -679,6 +744,14 @@ export const modelLifecycleAssignmentsRelations = relations(modelLifecycleAssign
 
 // Insert Schemas
 export const insertDataModelSchema = createInsertSchema(dataModels).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDataModelLayerSchema = createInsertSchema(dataModelLayers, {
+  dataModelId: z.number().optional(),
+}).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -729,6 +802,12 @@ export const insertDataObjectRelationshipSchema = createInsertSchema(dataObjectR
 });
 
 export const insertDataModelObjectRelationshipSchema = createInsertSchema(dataModelObjectRelationships).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertDataModelLayerObjectSchema = createInsertSchema(dataModelLayerObjects).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -812,11 +891,17 @@ export const insertModelLifecycleAssignmentSchema = createInsertSchema(modelLife
 export type DataModel = typeof dataModels.$inferSelect;
 export type InsertDataModel = z.infer<typeof insertDataModelSchema>;
 
+export type DataModelLayer = typeof dataModelLayers.$inferSelect;
+export type InsertDataModelLayer = z.infer<typeof insertDataModelLayerSchema>;
+
 export type DataDomain = typeof dataDomains.$inferSelect;
 export type InsertDataDomain = z.infer<typeof insertDataDomainSchema>;
 
 export type DataArea = typeof dataAreas.$inferSelect;
 export type InsertDataArea = z.infer<typeof insertDataAreaSchema>;
+
+export type DataModelLayerObject = typeof dataModelLayerObjects.$inferSelect;
+export type InsertDataModelLayerObject = z.infer<typeof insertDataModelLayerObjectSchema>;
 
 export type DataObject = typeof dataObjects.$inferSelect;
 export type InsertDataObject = z.infer<typeof insertDataObjectSchema>;

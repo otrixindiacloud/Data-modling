@@ -2,17 +2,19 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useModelerStore } from "@/store/modelerStore";
 import { DataModel } from "@shared/schema";
-import { Database, Layers3, Server } from "lucide-react";
+import { Database, GitBranch, Layers3, Server } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ModelLayer } from "@/types/modeler";
 
 const LAYER_ICONS = {
+  flow: GitBranch,
   conceptual: Database,
   logical: Layers3,
   physical: Server,
 };
 
 const LAYER_DESCRIPTIONS = {
+  flow: "End-to-end data movement and process orchestration",
   conceptual: "High-level business entities and relationships",
   logical: "Detailed attributes, keys, and data types",
   physical: "Implementation-specific constraints and storage",
@@ -134,18 +136,20 @@ export default function LayerNavigator() {
   }, [rootModel, currentModel, models]);
 
   const layerModels = useMemo(() => {
+    const flow = resolveLayerModel("flow", currentModel, modelFamily, modelMap);
     const conceptual = resolveLayerModel("conceptual", currentModel, modelFamily, modelMap) ?? rootModel ?? currentModel;
     const logical = resolveLayerModel("logical", currentModel, modelFamily, modelMap);
     const physical = resolveLayerModel("physical", currentModel, modelFamily, modelMap);
 
     return {
+      flow,
       conceptual,
       logical,
       physical,
     };
   }, [currentModel, modelFamily, modelMap, rootModel]);
 
-  const layers = ["conceptual", "logical", "physical"] as const;
+  const layers = ["flow", "conceptual", "logical", "physical"] as const;
 
   if (!currentModel) {
     return null;

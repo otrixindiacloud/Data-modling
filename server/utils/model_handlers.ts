@@ -1,5 +1,5 @@
 import type { Storage } from "../storage";
-import type { DataModel, InsertDataModel } from "@shared/schema";
+import type { DataModelLayer, InsertDataModelLayer } from "@shared/schema";
 import { getTargetSystemTemplate } from "../services/targetSystemTemplates";
 import { parseOptionalNumber, resolveDomainAndArea, getSystemIdByName } from "./route_helpers";
 
@@ -12,15 +12,16 @@ export interface CreateModelWithLayersInput {
 }
 
 export interface CreateModelWithLayersResult {
-  conceptual: DataModel;
-  logical: DataModel;
-  physical: DataModel;
+  flow: DataModelLayer;
+  conceptual: DataModelLayer;
+  logical: DataModelLayer;
+  physical: DataModelLayer;
   templatesAdded: number;
   message: string;
 }
 
 /**
- * Create a model with all 3 layers (Conceptual, Logical, Physical)
+ * Create a model with all 4 layers (Flow, Conceptual, Logical, Physical)
  * and optionally populate with template objects
  */
 export async function createModelWithLayers(
@@ -52,18 +53,29 @@ export async function createModelWithLayers(
     await resolveDomainAndArea(storage, domainId, dataAreaId);
 
   // Create conceptual model first (parent model)
-  const conceptualModel = await storage.createDataModel({
-    name: name,
+  const conceptualModel = await storage.createDataModelLayer({
+    name,
     layer: "conceptual",
     targetSystemId: resolvedTargetSystemId,
     domainId: resolvedDomainId,
     dataAreaId: resolvedDataAreaId,
   });
 
+  const flowModel = await storage.createDataModelLayer({
+    name,
+    layer: "flow",
+    parentModelId: conceptualModel.id,
+    dataModelId: conceptualModel.dataModelId,
+    targetSystemId: resolvedTargetSystemId,
+    domainId: resolvedDomainId,
+    dataAreaId: resolvedDataAreaId,
+  });
+
   // Create logical model linked to conceptual
-  const logicalModel = await storage.createDataModel({
-    name: name,
+  const logicalModel = await storage.createDataModelLayer({
+    name,
     layer: "logical",
+    dataModelId: conceptualModel.dataModelId,
     parentModelId: conceptualModel.id,
     targetSystemId: resolvedTargetSystemId,
     domainId: resolvedDomainId,
@@ -71,9 +83,10 @@ export async function createModelWithLayers(
   });
 
   // Create physical model linked to conceptual
-  const physicalModel = await storage.createDataModel({
-    name: name,
+  const physicalModel = await storage.createDataModelLayer({
+    name,
     layer: "physical",
+    dataModelId: conceptualModel.dataModelId,
     parentModelId: conceptualModel.id,
     targetSystemId: resolvedTargetSystemId,
     domainId: resolvedDomainId,
@@ -103,11 +116,12 @@ export async function createModelWithLayers(
   }
 
   return {
+    flow: flowModel,
     conceptual: conceptualModel,
     logical: logicalModel,
     physical: physicalModel,
     templatesAdded,
-    message: `Model created with all 3 layers${
+    message: `Model created with all 4 layers${
       template ? ` and ${templatesAdded} template objects from ${selectedTargetSystem}` : ""
     }`,
   };
@@ -118,9 +132,9 @@ export async function createModelWithLayers(
  */
 async function populateModelsFromTemplate(
   models: {
-    conceptualModel: DataModel;
-    logicalModel: DataModel;
-    physicalModel: DataModel;
+    conceptualModel: DataModelLayer;
+    logicalModel: DataModelLayer;
+    physicalModel: DataModelLayer;
   },
   template: any,
   selectedTargetSystem: string,

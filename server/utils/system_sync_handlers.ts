@@ -1,5 +1,5 @@
 import type { Storage } from "../storage";
-import type { System, DataObject, Attribute, InsertDataObject } from "@shared/schema";
+import type { System, DataObject, Attribute } from "@shared/schema";
 import { z } from "zod";
 import {
   extractPreferredDomainId,
@@ -141,15 +141,7 @@ export async function syncSystemObjects(
   existingObjects.forEach((object) => {
     const key = object.name.toLowerCase();
     objectRegistry.set(key, object);
-
-    const association: SystemObjectDirection | null =
-      object.sourceSystemId === systemId
-        ? "source"
-        : object.targetSystemId === systemId
-          ? "target"
-          : null;
-
-    if (association === direction) {
+    if (object.systemId === systemId) {
       relevantExisting.set(key, object);
     }
   });
@@ -188,8 +180,7 @@ export async function syncSystemObjects(
         metadata: metadataPayload,
         domainId: effectiveDomainId ?? existingObject.domainId ?? null,
         dataAreaId: effectiveDataAreaId ?? existingObject.dataAreaId ?? null,
-        sourceSystemId: direction === "source" ? systemId : existingObject.sourceSystemId,
-        targetSystemId: direction === "target" ? systemId : existingObject.targetSystemId,
+        systemId,
         isNew: false,
       });
       updated.push(updatedObject);
@@ -212,11 +203,9 @@ export async function syncSystemObjects(
       // Create new object
       const createdObject = await storage.createDataObject({
         name: table.name,
-        modelId,
         domainId: effectiveDomainId ?? null,
         dataAreaId: effectiveDataAreaId ?? null,
-        sourceSystemId: direction === "source" ? systemId : null,
-        targetSystemId: direction === "target" ? systemId : null,
+        systemId,
         metadata: metadataPayload,
         objectType: Array.isArray(table.columns) && table.columns.length ? "table" : "entity",
         isNew: true,

@@ -161,14 +161,14 @@ export default function AddDataModelModal({
     onSuccess: (responseData) => {
       queryClient.invalidateQueries({ queryKey: ["/api/models"] });
       
-      // Switch to the newly created conceptual model
-      if (responseData?.conceptual) {
-        setCurrentModel(responseData.conceptual);
+      // Switch to the newly created conceptual (or flow) model
+      if (responseData?.conceptual ?? responseData?.flow) {
+        setCurrentModel(responseData.conceptual ?? responseData.flow);
       }
       
       toast({
         title: "Success", 
-        description: "Data model created with Conceptual, Logical, and Physical layers. Switched to new model.",
+        description: "Data model created with Flow, Conceptual, Logical, and Physical layers. Switched to new model.",
       });
       const defaultSystem = systems[0];
       const defaultDomain = domains[0];
@@ -206,7 +206,7 @@ export default function AddDataModelModal({
         <DialogHeader>
           <DialogTitle>Create New Data Model</DialogTitle>
           <DialogDescription>
-            This will create a complete model with Conceptual, Logical, and Physical layers.
+            This will create a complete model with Flow, Conceptual, Logical, and Physical layers.
           </DialogDescription>
         </DialogHeader>
 

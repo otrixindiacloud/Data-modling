@@ -1,5 +1,5 @@
 import type { Storage } from "../storage";
-import type { DataObject, DataModel, Attribute } from "@shared/schema";
+import type { DataObject, DataModelLayer, Attribute } from "@shared/schema";
 import { replicateObjectToLayer, type LayerCreationResult } from "./model_utils";
 import type { ModelLayer } from "./validation_schemas";
 
@@ -16,7 +16,7 @@ export interface GenerateNextLayerInput {
 
 export interface GenerateNextLayerResult extends LayerCreationResult {
   sourceObject: DataObject;
-  sourceModel: DataModel;
+  sourceModel: DataModelLayer;
   targetLayer: ModelLayer;
 }
 
@@ -27,8 +27,8 @@ export interface GenerateNextLayerResult extends LayerCreationResult {
 export async function findNextLayerModel(
   sourceModelId: number,
   storage: Storage
-): Promise<DataModel | null> {
-  const sourceModel = await storage.getDataModel(sourceModelId);
+): Promise<DataModelLayer | null> {
+  const sourceModel = await storage.getDataModelLayer(sourceModelId);
   if (!sourceModel) return null;
   
   const targetLayer: ModelLayer | null = 
@@ -39,7 +39,7 @@ export async function findNextLayerModel(
   if (!targetLayer) return null;
   
   // Find sibling or child model with target layer
-  const allModels = await storage.getDataModels();
+  const allModels = await storage.getDataModelLayers();
   
   // First try: direct child
   const directChild = allModels.find(
@@ -88,7 +88,7 @@ export async function generateNextLayerObject(
   }
   
   // 2. Get source model
-  const sourceModel = await storage.getDataModel(sourceObject.modelId);
+  const sourceModel = await storage.getDataModelLayer(sourceObject.modelId);
   if (!sourceModel) {
     throw new Error("Source model not found");
   }
@@ -100,9 +100,9 @@ export async function generateNextLayerObject(
     (() => { throw new Error("Cannot generate next layer from physical model"); })();
   
   // 4. Get or find target model
-  let targetModel: DataModel;
+  let targetModel: DataModelLayer;
   if (targetModelId) {
-    const model = await storage.getDataModel(targetModelId);
+    const model = await storage.getDataModelLayer(targetModelId);
     if (!model) {
       throw new Error("Target model not found");
     }
@@ -186,7 +186,7 @@ export async function generateLogicalObject(
     throw new Error("Source object not found");
   }
   
-  const sourceModel = await storage.getDataModel(sourceObject.modelId);
+  const sourceModel = await storage.getDataModelLayer(sourceObject.modelId);
   if (!sourceModel) {
     throw new Error("Source model not found");
   }
@@ -212,7 +212,7 @@ export async function generatePhysicalObject(
     throw new Error("Source object not found");
   }
   
-  const sourceModel = await storage.getDataModel(sourceObject.modelId);
+  const sourceModel = await storage.getDataModelLayer(sourceObject.modelId);
   if (!sourceModel) {
     throw new Error("Source model not found");
   }

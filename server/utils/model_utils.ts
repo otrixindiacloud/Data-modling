@@ -1,6 +1,7 @@
 import { storage } from "../storage";
 import type {
   DataModel,
+  DataModelLayer,
   DataModelObject,
   DataModelAttribute,
   DataModelObjectRelationship,
@@ -94,17 +95,17 @@ export function getDefaultLength(dataType: string | null): number | null {
 
 // Model family resolution
 export interface ModelFamily {
-  conceptual: DataModel;
-  logical?: DataModel;
-  physical?: DataModel;
-  members: DataModel[];
+  conceptual: DataModelLayer;
+  logical?: DataModelLayer;
+  physical?: DataModelLayer;
+  members: DataModelLayer[];
 }
 
 export function findConceptualRoot(
-  model: DataModel,
-  modelById: Map<number, DataModel>,
-): DataModel {
-  let current: DataModel = model;
+  model: DataModelLayer,
+  modelById: Map<number, DataModelLayer>,
+): DataModelLayer {
+  let current: DataModelLayer = model;
   const visited = new Set<number>();
 
   while (current.layer !== "conceptual" && current.parentModelId) {
@@ -124,8 +125,8 @@ export function findConceptualRoot(
   return current.layer === "conceptual" ? current : model;
 }
 
-export async function resolveModelFamily(model: DataModel): Promise<ModelFamily> {
-  const allModels = await storage.getDataModels();
+export async function resolveModelFamily(model: DataModelLayer): Promise<ModelFamily> {
+  const allModels = await storage.getDataModelLayers();
   const modelById = new Map(allModels.map((entry) => [entry.id, entry]));
   const conceptualRoot = findConceptualRoot(model, modelById);
 
@@ -167,7 +168,7 @@ export function findDataModelAttributeId(
 
 export interface LayerCreationResult {
   layer: ModelLayer;
-  model: DataModel;
+  model: DataModelLayer;
   object: DataObject;
   modelObject: DataModelObject;
   attributes: Attribute[];
@@ -204,9 +205,9 @@ export function mergeLayerConfig(base: ModelObjectConfigInput, override?: ModelO
 
 export async function replicateObjectToLayer(params: {
   layer: ModelLayer;
-  conceptualModel: DataModel;
+  conceptualModel: DataModelLayer;
   conceptualObject: DataObject;
-  targetModel: DataModel;
+  targetModel: DataModelLayer;
   baseObjectPayload: InsertDataObject;
   attributeInputs: AttributeInput[];
   config: ModelObjectConfigInput;

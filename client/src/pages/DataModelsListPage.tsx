@@ -16,8 +16,12 @@ import type { DataModel, DataDomain, DataArea, System } from "@shared/schema";
 import type { ModelLayer } from "@/types/modeler";
 
 interface ModelGroup {
-  conceptual: DataModel;
-  children: DataModel[];
+  dataModelId: number;
+  flow?: DataModel;
+  conceptual?: DataModel;
+  logical?: DataModel;
+  physical?: DataModel;
+  layers: DataModel[];
 }
 
 const fetchJson = async <T,>(url: string): Promise<T> => {
@@ -80,38 +84,55 @@ export default function DataModelsListPage() {
   const groupedModels = useMemo<ModelGroup[]>(() => {
     if (!Array.isArray(models)) return [];
 
-    const modelsWithChildren = new Map<number, ModelGroup>();
+    const typedModels = models as DataModel[];
+    const groups = new Map<number, ModelGroup>();
 
-    models.forEach((model) => {
-      if (!modelsWithChildren.has(model.id)) {
-        modelsWithChildren.set(model.id, { conceptual: model, children: [] });
+    typedModels.forEach((model) => {
+      const key = model.dataModelId ?? model.id;
+      let group = groups.get(key);
+
+      if (!group) {
+        group = {
+          dataModelId: key,
+          layers: [],
+        };
+        groups.set(key, group);
+      }
+
+      group.layers.push(model);
+
+      switch (model.layer) {
+        case "flow":
+          group.flow = model;
+          break;
+        case "conceptual":
+          group.conceptual = model;
+          break;
+        case "logical":
+          group.logical = model;
+          break;
+        case "physical":
+          group.physical = model;
+          break;
+        default:
+          break;
       }
     });
 
-    models.forEach((model) => {
-      if (model.parentModelId) {
-        const parent = modelsWithChildren.get(model.parentModelId);
-        if (parent) {
-          parent.children.push(model);
-        }
-      }
-    });
-
-    return Array.from(modelsWithChildren.values()).filter(
-      (group) => group.conceptual.layer === "conceptual" && !group.conceptual.parentModelId,
-    );
+    return Array.from(groups.values()).filter((group) => group.conceptual || group.flow);
   }, [models]);
 
   const filteredGroups = useMemo(() => {
     if (!searchTerm) return groupedModels;
     const normalized = searchTerm.toLowerCase();
     return groupedModels.filter((group) => {
-      const conceptual = group.conceptual;
-      const domainName = conceptual.domainId ? domainMap.get(conceptual.domainId)?.toLowerCase() : "";
-      const areaName = conceptual.dataAreaId ? areaMap.get(conceptual.dataAreaId)?.toLowerCase() : "";
-      const systemName = conceptual.targetSystemId ? systemMap.get(conceptual.targetSystemId)?.toLowerCase() : "";
+      const anchor = group.conceptual ?? group.flow;
+      if (!anchor) return false;
+      const domainName = anchor.domainId ? domainMap.get(anchor.domainId)?.toLowerCase() : "";
+      const areaName = anchor.dataAreaId ? areaMap.get(anchor.dataAreaId)?.toLowerCase() : "";
+      const systemName = anchor.targetSystemId ? systemMap.get(anchor.targetSystemId)?.toLowerCase() : "";
       return (
-        conceptual.name.toLowerCase().includes(normalized) ||
+        anchor.name.toLowerCase().includes(normalized) ||
         (domainName && domainName.includes(normalized)) ||
         (areaName && areaName.includes(normalized)) ||
         (systemName && systemName.includes(normalized))
@@ -124,7 +145,7 @@ export default function DataModelsListPage() {
 
     if (typeof window !== "undefined") {
       try {
-        window.sessionStorage.setItem("modeler:pendingLayer", "conceptual");
+        window.sessionStorage.setItem("modeler:pendingLayer", model.layer as ModelLayer);
         window.sessionStorage.setItem("modeler:pendingModelId", model.id.toString());
       } catch (error) {
         console.warn("Failed to persist conceptual layer before navigation", error);
@@ -287,45 +308,60 @@ export default function DataModelsListPage() {
         ) : (
           <div className="grid gap-6 md:grid-cols-3">
             {filteredGroups.map((group) => {
-              const { conceptual, children } = group;
-              const logicalLayer = children.find((model) => model.layer === "logical");
-              const physicalLayer = children.find((model) => model.layer === "physical");
+              const { flow, conceptual, logical, physical } = group;
+              const primary = conceptual ?? flow;
+
+              if (!primary) {
+                return null;
+              }
+
+              const conceptualId = conceptual?.id ?? primary.id;
+
+              const associatedLayers: Array<{ label: string; layerKey: ModelLayer; model?: DataModel }>
+                = [
+                  { label: "Flow", layerKey: "flow", model: flow },
+                  { label: "Conceptual", layerKey: "conceptual", model: conceptual },
+                  { label: "Logical", layerKey: "logical", model: logical },
+                  { label: "Physical", layerKey: "physical", model: physical },
+                ];
 
               return (
-                <Card key={conceptual.id} className="relative overflow-hidden border-border/70 hover:shadow-lg transition-shadow duration-200">
+                <Card key={`${group.dataModelId}-${primary.id}`} className="relative overflow-hidden border-border/70 hover:shadow-lg transition-shadow duration-200">
                   <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent pointer-events-none" />
                   <CardHeader className="relative space-y-3">
                     <div className="flex items-start justify-between gap-4">
                       <div className="space-y-1">
                         <CardTitle className="text-xl font-semibold text-foreground">
-                          {conceptual.name}
+                          {primary.name}
                         </CardTitle>
                         <CardDescription className="text-sm text-muted-foreground">
-                          Conceptual model created {new Date(conceptual.createdAt).toLocaleDateString()}
+                          {conceptual
+                            ? `Conceptual model created ${new Date(conceptual.createdAt).toLocaleDateString()}`
+                            : `Flow model created ${new Date(flow!.createdAt).toLocaleDateString()}`}
                         </CardDescription>
                       </div>
                       <Badge variant="outline" className="bg-background/60 text-xs uppercase tracking-wide">
-                        Conceptual
+                        {conceptual ? "Conceptual" : "Flow"}
                       </Badge>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                      {conceptual.domainId && (
+                      {primary.domainId && (
                         <span className="flex items-center gap-1">
                           <Layers3 className="h-4 w-4 text-primary" />
-                          {domainMap.get(conceptual.domainId) ?? "Domain"}
+                          {domainMap.get(primary.domainId) ?? "Domain"}
                         </span>
                       )}
-                      {conceptual.dataAreaId && (
+                      {primary.dataAreaId && (
                         <span className="flex items-center gap-1">
                           <MapPin className="h-4 w-4 text-primary" />
-                          {areaMap.get(conceptual.dataAreaId) ?? "Data Area"}
+                          {areaMap.get(primary.dataAreaId) ?? "Data Area"}
                         </span>
                       )}
-                      {conceptual.targetSystemId && (
+                      {primary.targetSystemId && (
                         <span className="flex items-center gap-1">
                           <Database className="h-4 w-4 text-primary" />
-                          {systemMap.get(conceptual.targetSystemId) ?? "Target System"}
+                          {systemMap.get(primary.targetSystemId) ?? "Target System"}
                         </span>
                       )}
                     </div>
@@ -335,30 +371,26 @@ export default function DataModelsListPage() {
                     <div className="rounded-lg border border-border/60 bg-background/70 p-4 space-y-3">
                       <div className="font-medium text-sm text-foreground/80">Associated layers</div>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <LayerBadge
-                          label="Logical"
-                          layerKey="logical"
-                          model={logicalLayer}
-                          onNavigate={(layerModel, layerKey) =>
-                            handleLayerNavigation(layerModel, layerKey, conceptual.id)
-                          }
-                        />
-                        <LayerBadge
-                          label="Physical"
-                          layerKey="physical"
-                          model={physicalLayer}
-                          onNavigate={(layerModel, layerKey) =>
-                            handleLayerNavigation(layerModel, layerKey, conceptual.id)
-                          }
-                        />
+                        {associatedLayers.map(({ label, layerKey, model }) => (
+                          <LayerBadge
+                            key={`${group.dataModelId}-${layerKey}`}
+                            label={label}
+                            layerKey={layerKey}
+                            model={model}
+                            onNavigate={model
+                              ? (layerModel, layer) =>
+                                  handleLayerNavigation(layerModel, layer, conceptualId)
+                              : undefined}
+                          />
+                        ))}
                       </div>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="text-xs text-muted-foreground">
-                        Updated {new Date(conceptual.updatedAt).toLocaleString()}
+                        Updated {new Date(primary.updatedAt).toLocaleString()}
                       </div>
-                      <Button onClick={() => handleViewDetails(conceptual)} className="flex items-center gap-2">
+                      <Button onClick={() => handleViewDetails(primary)} className="flex items-center gap-2">
                         View details
                         <ArrowRight className="h-4 w-4" />
                       </Button>

@@ -151,7 +151,7 @@ import {
 
 // Import schema types
 import { 
-  insertDataModelSchema,
+  insertDataModelLayerSchema,
   insertDataDomainSchema,
   insertDataAreaSchema,
   insertDataObjectSchema,
@@ -161,6 +161,7 @@ import {
   insertSystemSchema,
   insertConfigurationSchema,
   type DataModel,
+  type DataModelLayer,
   type DataModelObject,
   type DataModelAttribute,
   type DataModelObjectRelationship,
@@ -183,7 +184,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/models", async (req, res) => {
     try {
-      const models = await storage.getDataModels();
+      const models = await storage.getDataModelLayers();
       res.json(models);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch models" });
@@ -193,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/models/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const model = await storage.getDataModel(id);
+      const model = await storage.getDataModelLayer(id);
       if (!model) {
         return res.status(404).json({ message: "Model not found" });
       }
@@ -205,15 +206,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/models", async (req, res) => {
     try {
-      const validatedData = insertDataModelSchema.parse(req.body);
-      const model = await storage.createDataModel(validatedData);
+      const validatedData = insertDataModelLayerSchema.parse(req.body);
+      const model = await storage.createDataModelLayer(validatedData);
       res.status(201).json(model);
     } catch (error) {
       res.status(400).json({ message: "Invalid model data" });
     }
   });
 
-  // Create model with all 3 layers (Conceptual, Logical, Physical)
+  // Create model with all 4 layers (Flow, Conceptual, Logical, Physical)
   app.post("/api/models/create-with-layers", async (req, res) => {
     try {
       const input: CreateModelWithLayersInput = req.body;
@@ -229,8 +230,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/models/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const validatedData = insertDataModelSchema.partial().parse(req.body);
-      const model = await storage.updateDataModel(id, validatedData);
+      const validatedData = insertDataModelLayerSchema.partial().parse(req.body);
+      const model = await storage.updateDataModelLayer(id, validatedData);
       res.json(model);
     } catch (error) {
       res.status(400).json({ message: "Failed to update model" });
@@ -240,7 +241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/models/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      await storage.deleteDataModel(id);
+      await storage.deleteDataModelLayer(id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Failed to delete model" });
@@ -480,37 +481,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/objects", async (req, res) => {
     try {
       const objects = await storage.getAllDataObjects();
-      
-      // Enhance objects with resolved names for domain, dataArea, and systems
-      const enhancedObjects = await Promise.all(objects.map(async (obj) => {
-        let domainName, dataAreaName, sourceSystemName, targetSystemName;
-        
-        if (obj.domainId) {
-          const domain = await storage.getDataDomain(obj.domainId);
-          domainName = domain?.name;
-        }
-        if (obj.dataAreaId) {
-          const dataArea = await storage.getDataArea(obj.dataAreaId);
-          dataAreaName = dataArea?.name;
-        }
-        if (obj.sourceSystemId) {
-          const sourceSystem = await storage.getSystem(obj.sourceSystemId);
-          sourceSystemName = sourceSystem?.name;
-        }
-        if (obj.targetSystemId) {
-          const targetSystem = await storage.getSystem(obj.targetSystemId);
-          targetSystemName = targetSystem?.name;
-        }
-        
-        return {
-          ...obj,
-          domainName,
-          dataAreaName,
-          sourceSystem: sourceSystemName,
-          targetSystem: targetSystemName,
-        };
-      }));
-      
+
+      // Enhance objects with resolved names for domain, dataArea, and owning system
+      const enhancedObjects = await Promise.all(
+        objects.map(async (obj) => {
+          let domainName: string | undefined;
+          let dataAreaName: string | undefined;
+          let systemName: string | undefined;
+
+          if (obj.domainId) {
+            const domain = await storage.getDataDomain(obj.domainId);
+            domainName = domain?.name;
+          }
+
+          if (obj.dataAreaId) {
+            const dataArea = await storage.getDataArea(obj.dataAreaId);
+            dataAreaName = dataArea?.name;
+          }
+
+          if (obj.systemId) {
+            const system = await storage.getSystem(obj.systemId);
+            systemName = system?.name;
+          }
+
+          return {
+            ...obj,
+            domainName,
+            dataAreaName,
+            system: systemName,
+          };
+        })
+      );
+
       res.json(enhancedObjects);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch all objects" });
@@ -1054,7 +1056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         storage.getDataModelObjectRelationships(),
         storage.getDataModelProperties(),
         storage.getSystems(),
-        storage.getDataModels(),
+        storage.getDataModelLayers(),
         storage.getDataDomains(),
         storage.getDataAreas()
       ]);
@@ -1064,7 +1066,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         systemById.set(system.id, system);
       });
 
-      const modelById = new Map<number, DataModel>();
+      const modelById = new Map<number, DataModelLayer>();
       models.forEach((model) => {
         modelById.set(model.id, model);
       });
@@ -1211,7 +1213,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dataArea: DataArea | null;
         sourceSystem: System | null;
         targetSystem: System | null;
-        baseModel: DataModel | null;
+        baseModel: DataModelLayer | null;
         baseMetadata: {
           position?: Record<string, any> | null;
           metadata?: Record<string, any> | null;
@@ -1225,7 +1227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         modelInstances: Array<{
           id: number;
-          model: DataModel | null;
+          model: DataModelLayer | null;
           targetSystem: System | null;
           position: Record<string, any> | null;
           metadata: Record<string, any> | null;
@@ -1376,9 +1378,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const domain = object.domainId ? domainById.get(object.domainId) ?? null : null;
         const dataArea = object.dataAreaId ? areaById.get(object.dataAreaId) ?? null : null;
-        const baseModel = object.modelId ? modelById.get(object.modelId) ?? null : null;
-        const sourceSystem = object.sourceSystemId ? systemById.get(object.sourceSystemId) ?? null : null;
-        const targetSystem = object.targetSystemId ? systemById.get(object.targetSystemId) ?? null : null;
+        const baseModel =
+          modelInstances.find((instance) => instance.model?.layer === "conceptual")?.model ??
+          modelInstances[0]?.model ??
+          null;
+        const owningSystem = object.systemId ? systemById.get(object.systemId) ?? null : null;
 
         const stats = {
           attributeCount: attributeSummaries.length,
@@ -1387,7 +1391,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lastUpdated: object.updatedAt ? new Date(object.updatedAt).toISOString() : null
         };
 
-        const tags = [object.objectType, domain?.name, dataArea?.name].filter((value): value is string => Boolean(value));
+        const tags = [object.objectType, domain?.name, dataArea?.name, owningSystem?.name]
+          .filter((value): value is string => Boolean(value));
 
         return {
           id: object.id,
@@ -1396,8 +1401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           objectType: object.objectType ?? null,
           domain,
           dataArea,
-          sourceSystem,
-          targetSystem,
+          system: owningSystem,
           baseModel,
           baseMetadata: {
             position: object.position ?? null,
@@ -1423,8 +1427,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const matchesSearch =
             object.name.toLowerCase().includes(searchValue) ||
             (object.description?.toLowerCase().includes(searchValue) ?? false) ||
-            (object.sourceSystem?.name.toLowerCase().includes(searchValue) ?? false) ||
-            (object.targetSystem?.name.toLowerCase().includes(searchValue) ?? false) ||
+            (object.system?.name.toLowerCase().includes(searchValue) ?? false) ||
             object.tags.some((tag) => tag.toLowerCase().includes(searchValue));
           if (!matchesSearch) {
             return false;
@@ -1440,9 +1443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         if (selectedSystemId !== null) {
-          const matchesBaseSystem =
-            object.sourceSystem?.id === selectedSystemId ||
-            object.targetSystem?.id === selectedSystemId;
+          const matchesBaseSystem = object.system?.id === selectedSystemId;
           const matchesInstanceSystem = object.modelInstances.some((instance) => instance.targetSystem?.id === selectedSystemId);
           if (!matchesBaseSystem && !matchesInstanceSystem) {
             return false;
@@ -1929,28 +1930,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "System not found" });
       }
 
-      const roleParam = typeof req.query.role === "string" ? req.query.role.toLowerCase() : "all";
-      const role: SystemObjectDirection | "all" = roleParam === "source" || roleParam === "target" ? (roleParam as SystemObjectDirection) : "all";
+      const objects = await storage.getDataObjectsBySystem(systemId);
 
-      let objects: DataObject[] = [];
-      if (role === "source") {
-        objects = await storage.getDataObjectsBySourceSystem(systemId);
-      } else if (role === "target") {
-        objects = await storage.getDataObjectsByTargetSystem(systemId);
-      } else {
-        const [sourceObjects, targetObjects] = await Promise.all([
-          storage.getDataObjectsBySourceSystem(systemId),
-          storage.getDataObjectsByTargetSystem(systemId),
-        ]);
-        const dedup = new Map<number, DataObject>();
-        sourceObjects.forEach((object) => dedup.set(object.id, object));
-        targetObjects.forEach((object) => dedup.set(object.id, object));
-        objects = Array.from(dedup.values());
-      }
-
-      const [models, attributes] = await Promise.all([
-        storage.getDataModels(),
+      const [models, attributes, modelObjects] = await Promise.all([
+        storage.getDataModelLayers(),
         storage.getAllAttributes(),
+        storage.getDataModelObjects(),
       ]);
 
       const attributeCounts = new Map<number, number>();
@@ -1959,27 +1944,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         attributeCounts.set(attribute.objectId, count + 1);
       });
 
-      const modelMap = new Map<number, DataModel>();
+      const modelMap = new Map<number, DataModelLayer>();
       models.forEach((model) => modelMap.set(model.id, model));
 
+      const modelObjectsByDataObject = new Map<number, DataModelObject[]>();
+      modelObjects.forEach((modelObject) => {
+        if (modelObject.objectId === null) {
+          return;
+        }
+        const existing = modelObjectsByDataObject.get(modelObject.objectId) ?? [];
+        existing.push(modelObject);
+        modelObjectsByDataObject.set(modelObject.objectId, existing);
+      });
+
       const enriched = objects.map((object) => {
-        const modelInfo = modelMap.get(object.modelId);
+        const modelLinks = modelObjectsByDataObject.get(object.id) ?? [];
+        const primaryModel =
+          modelLinks
+            .map((link) => modelMap.get(link.modelId) ?? null)
+            .find((model) => model?.layer === "conceptual") ??
+          (modelLinks.length > 0 ? modelMap.get(modelLinks[0].modelId) ?? null : null);
         return {
           ...object,
           attributeCount: attributeCounts.get(object.id) ?? 0,
-          model: modelInfo
+          model: primaryModel
             ? {
-                id: modelInfo.id,
-                name: modelInfo.name,
-                layer: modelInfo.layer,
+                id: primaryModel.id,
+                name: primaryModel.name,
+                layer: primaryModel.layer,
               }
             : null,
-          systemAssociation:
-            object.sourceSystemId === systemId
-              ? "source"
-              : object.targetSystemId === systemId
-                ? "target"
-                : null,
+          systemAssociation: object.systemId === systemId ? "owner" : null,
         };
       });
 
@@ -2011,11 +2006,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Object not found" });
       }
 
-      const association: SystemObjectDirection | null = object.sourceSystemId === systemId
-        ? "source"
-        : object.targetSystemId === systemId
-          ? "target"
-          : null;
+      const association = object.systemId === systemId ? "owner" : null;
 
       if (!association) {
         return res.status(400).json({ message: "Object is not associated with this system" });
@@ -2087,7 +2078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Object not found" });
       }
 
-      if (object.sourceSystemId !== systemId && object.targetSystemId !== systemId) {
+      if (object.systemId !== systemId) {
         return res.status(400).json({ message: "Object is not associated with this system" });
       }
 
@@ -2323,6 +2314,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // All objects - data is in data_model_objects
         const modelAttrs = modelAttributesByModelObjectId.get(modelObj.id) ?? [];
         
+        // If name is missing, try to get it from linked data_object
+        let objectName = modelObj.name;
+        let objectDescription = modelObj.description;
+        let objectType = modelObj.objectType;
+        
+        if (modelObj.objectId && !objectName) {
+          const dataObject = await storage.getDataObject(modelObj.objectId);
+          if (dataObject) {
+            objectName = dataObject.name;
+            objectDescription = objectDescription || dataObject.description;
+            objectType = objectType || dataObject.objectType;
+          }
+        }
+        
         // Get domain and area information
         let domainName, domainColor, dataAreaName;
         if (modelObj.domainId) {
@@ -2365,9 +2370,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             id: modelObj.id,
             objectId: modelObj.objectId, // The actual data_objects.id (null for user-created)
             modelObjectId: modelObj.id,  // The data_model_objects.id (always present)
-            name: modelObj.name || "Unnamed Object",
-            objectType: modelObj.objectType || "entity",
-            description: modelObj.description,
+            name: objectName || "Unnamed Object",
+            objectType: objectType || "entity",
+            description: objectDescription,
             domainId: modelObj.domainId,
             dataAreaId: modelObj.dataAreaId,
             domain: domainName, // For node display (was domainName)
@@ -2834,7 +2839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const [configs, models, systemsList, objects, attrs, rels] = await Promise.all([
         storage.getConfigurations(),
-        storage.getDataModels(),
+        storage.getDataModelLayers(),
         storage.getSystems(),
         storage.getDataObjects(),
         storage.getAttributes(),

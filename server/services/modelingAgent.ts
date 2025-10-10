@@ -15,7 +15,7 @@ import {
 import { storage } from "../storage";
 import { ExportService } from "./exportService";
 
-type LayerName = "conceptual" | "logical" | "physical";
+type LayerName = "flow" | "conceptual" | "logical" | "physical";
 type DiffLayer = LayerName | "all";
 
 type DesiredRelationshipCardinality = "1:1" | "1:N" | "N:1" | "N:M" | "M:N";
