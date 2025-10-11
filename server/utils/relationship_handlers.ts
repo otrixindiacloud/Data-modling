@@ -186,9 +186,13 @@ export async function updateRelationship(
     throw new Error("Relationship not found");
   }
 
+  // Handle reconnection - if sourceModelObjectId or targetModelObjectId is provided, use it
+  const finalSourceModelObjectId = validatedPayload.sourceModelObjectId ?? existing.sourceModelObjectId;
+  const finalTargetModelObjectId = validatedPayload.targetModelObjectId ?? existing.targetModelObjectId;
+
   const [sourceModelObject, targetModelObject] = await Promise.all([
-    storage.getDataModelObject(existing.sourceModelObjectId),
-    storage.getDataModelObject(existing.targetModelObjectId),
+    storage.getDataModelObject(finalSourceModelObjectId),
+    storage.getDataModelObject(finalTargetModelObjectId),
   ]);
 
   if (!sourceModelObject || !targetModelObject) {
@@ -243,6 +247,19 @@ export async function updateRelationship(
   const finalDescription = Object.prototype.hasOwnProperty.call(payload, "description")
     ? validatedPayload.description ?? null
     : existing.description ?? null;
+  
+  // Handle sourceHandle and targetHandle updates
+  const finalSourceHandle = Object.prototype.hasOwnProperty.call(payload, "sourceHandle")
+    ? validatedPayload.sourceHandle ?? null
+    : existing.sourceHandle ?? null;
+  const finalTargetHandle = Object.prototype.hasOwnProperty.call(payload, "targetHandle")
+    ? validatedPayload.targetHandle ?? null
+    : existing.targetHandle ?? null;
+  
+  // Handle waypoints for orthogonal routing
+  const finalWaypoints = Object.prototype.hasOwnProperty.call(payload, "waypoints")
+    ? validatedPayload.waypoints ?? null
+    : (existing.metadata as any)?.waypoints ?? null;
 
   const sourceObjectId = sourceModelObject.objectId;
   const targetObjectId = targetModelObject.objectId;
@@ -334,6 +351,40 @@ export async function updateRelationship(
     name: finalName,
     description: finalDescription,
   });
+
+  // Update the model object relationship with new sourceHandle, targetHandle, and reconnection info
+  const relationshipUpdate: any = {};
+  
+  if (finalSourceModelObjectId !== existing.sourceModelObjectId) {
+    relationshipUpdate.sourceModelObjectId = finalSourceModelObjectId;
+  }
+  
+  if (finalTargetModelObjectId !== existing.targetModelObjectId) {
+    relationshipUpdate.targetModelObjectId = finalTargetModelObjectId;
+  }
+  
+  if (Object.prototype.hasOwnProperty.call(payload, "sourceHandle")) {
+    relationshipUpdate.sourceHandle = finalSourceHandle;
+  }
+  
+  if (Object.prototype.hasOwnProperty.call(payload, "targetHandle")) {
+    relationshipUpdate.targetHandle = finalTargetHandle;
+  }
+  
+  // Update waypoints (store in metadata for now, or in dedicated column if available)
+  if (Object.prototype.hasOwnProperty.call(payload, "waypoints")) {
+    // Store waypoints in metadata
+    const currentMetadata = (existing as any).metadata || {};
+    relationshipUpdate.metadata = {
+      ...currentMetadata,
+      waypoints: finalWaypoints
+    };
+  }
+  
+  // Apply updates if any
+  if (Object.keys(relationshipUpdate).length > 0) {
+    await storage.updateDataModelObjectRelationship(id, relationshipUpdate);
+  }
 
   const currentRelationship = familyRelationships.get(model.id);
 

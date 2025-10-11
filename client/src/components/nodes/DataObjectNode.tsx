@@ -173,34 +173,97 @@ function DataObjectNode({ data, selected }: NodeProps<CanvasNode["data"]>) {
         userSelect: 'none'
       }}
     >
-      {/* Connection Handles - Clean object-level handles for all layers */}
+      {/* Connection Handles - 12 handles total (3 per side) for flexible connections */}
+      {/* Top handles */}
       <Handle
         type="target"
         position={Position.Top}
-        className="w-3 h-3 bg-primary border-2 border-white shadow-lg hover:scale-125 transition-transform"
-        id="object-top"
-        style={{ top: -6 }}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="top-1"
+        style={{ top: -4, left: '25%' }}
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="top-2"
+        style={{ top: -4, left: '50%' }}
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="top-3"
+        style={{ top: -4, left: '75%' }}
+      />
+      
+      {/* Bottom handles */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="bottom-1"
+        style={{ bottom: -4, left: '25%' }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        className="w-3 h-3 bg-primary border-2 border-white shadow-lg hover:scale-125 transition-transform"
-        id="object-bottom"
-        style={{ bottom: -6 }}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="bottom-2"
+        style={{ bottom: -4, left: '50%' }}
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="bottom-3"
+        style={{ bottom: -4, left: '75%' }}
+      />
+      
+      {/* Left handles */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="left-1"
+        style={{ left: -4, top: '25%' }}
       />
       <Handle
         type="target"
         position={Position.Left}
-        className="w-3 h-3 bg-primary border-2 border-white shadow-lg hover:scale-125 transition-transform"
-        id="object-left"
-        style={{ left: -6 }}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="left-2"
+        style={{ left: -4, top: '50%' }}
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="left-3"
+        style={{ left: -4, top: '75%' }}
+      />
+      
+      {/* Right handles */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="right-1"
+        style={{ right: -4, top: '25%' }}
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="w-3 h-3 bg-primary border-2 border-white shadow-lg hover:scale-125 transition-transform"
-        id="object-right"
-        style={{ right: -6 }}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="right-2"
+        style={{ right: -4, top: '50%' }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="w-2 h-2 bg-primary border-2 border-white shadow-lg hover:scale-150 transition-transform"
+        id="right-3"
+        style={{ right: -4, top: '75%' }}
       />
 
       {/* Node Header */}

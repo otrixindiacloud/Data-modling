@@ -7,6 +7,7 @@ import {
   X,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   FileText,
   Search,
   RefreshCw
@@ -44,6 +45,10 @@ export default function DataObjectExplorer({
   const [selectedDomain, setSelectedDomain] = useState("all");
   const [selectedDataArea, setSelectedDataArea] = useState("all");
   const [selectedSystem, setSelectedSystem] = useState("all");
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(50); // Show 50 items per page
   
   // UI states
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -184,6 +189,20 @@ export default function DataObjectExplorer({
     return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }, [allDataObjects, searchTerm, selectedDomain, selectedDataArea, selectedSystem]);
 
+  // Paginated objects
+  const paginatedObjects = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return filteredObjects.slice(startIndex, endIndex);
+  }, [filteredObjects, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredObjects.length / pageSize);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedDomain, selectedDataArea, selectedSystem]);
+
   // System options for filtering
   const uniqueSystems = useMemo(() => {
     const systemsSet = new Set<string>();
@@ -230,6 +249,7 @@ export default function DataObjectExplorer({
     setSelectedDomain("all");
     setSelectedDataArea("all");
     setSelectedSystem("all");
+    setCurrentPage(1);
   };
 
   // Manual refresh function with forced cache invalidation
@@ -258,17 +278,8 @@ export default function DataObjectExplorer({
     }
   }, [refetchObjects, refetchAttributes, queryClient]);
 
-  const activeModelGroupId = useMemo(() => {
-    if (!currentModel) return null;
-    return currentModel.parentModelId ?? currentModel.id;
-  }, [currentModel]);
-
-  // Auto-refresh when switching to a different model family
-  useEffect(() => {
-    if (activeModelGroupId) {
-      handleRefresh();
-    }
-  }, [activeModelGroupId, handleRefresh]);
+  // Remove auto-refresh on model change to prevent multiple reloads
+  // Users can manually refresh using the refresh button
 
   // Listen for object creation and updates to auto-refresh
   useEffect(() => {
@@ -687,9 +698,47 @@ export default function DataObjectExplorer({
               <span className="text-xs text-muted-foreground">Loading...</span>
             </div>
           ) : filteredObjects.length > 0 ? (
-            <div className="space-y-2 pb-4">
-              {filteredObjects.map(renderObjectCard)}
-            </div>
+            <>
+              <div className="space-y-2">
+                {paginatedObjects.map(renderObjectCard)}
+              </div>
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-4 pb-2 px-2 border-t border-sidebar-border mt-4">
+                  <div className="text-xs text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                    <span className="ml-2">
+                      ({((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, filteredObjects.length)} of {filteredObjects.length})
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="h-7 px-2 text-xs"
+                      data-testid="button-prev-page"
+                    >
+                      <ChevronLeft className="h-3 w-3 mr-1" />
+                      Prev
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="h-7 px-2 text-xs"
+                      data-testid="button-next-page"
+                    >
+                      Next
+                      <ChevronRight className="h-3 w-3 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-3 opacity-30" />

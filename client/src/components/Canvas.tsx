@@ -10,9 +10,12 @@ import ReactFlow, {
   Controls,
   MiniMap,
   Background,
-  Connect3ion,
+  Connection,
   NodeTypes,
+  EdgeTypes,
   ReactFlowProvider,
+  OnEdgesChange,
+  EdgeChange,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { MousePointer, Move, Link, GitBranch, Save, AlertCircle, CheckCircle, Plus, Trash2 } from "lucide-react";
@@ -25,6 +28,8 @@ import { useModelerStore } from "@/store/modelerStore";
 import { DataModel } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import DataObjectNode from "./nodes/DataObjectNode";
+import RelationshipEdge from "./edges/RelationshipEdge";
+import OrthogonalRelationshipEdge from "./edges/OrthogonalRelationshipEdge";
 import CanvasControls from "./CanvasControls";
 import MiniMapControls from "./MiniMapControls";
 import UndoRedoTimeline from "./UndoRedoTimeline";
@@ -69,6 +74,13 @@ const buildRelationshipEdgeStyle = (type?: string | null, isAttribute = false) =
 // Define nodeTypes outside component to avoid recreation warning
 const nodeTypes: NodeTypes = {
   dataObject: DataObjectNode,
+};
+
+// Define custom edge types
+const edgeTypes = {
+  relationship: OrthogonalRelationshipEdge,
+  step: OrthogonalRelationshipEdge, // Use orthogonal edge for step type (90-degree angles)
+  smoothstep: OrthogonalRelationshipEdge, // Use orthogonal edge with visible draggable waypoints
 };
 
 function CanvasComponent() {
@@ -1726,6 +1738,103 @@ function CanvasComponent() {
     }
   }, [onEdgesChange, currentModel?.id, edges, saveToHistory, toast, currentLayerModel, currentLayer, queryClient]);
 
+  // Handle edge reconnection (when user drags edge source/target to a different node)
+  const onReconnect = useCallback(async (oldEdge: Edge, newConnection: Connection) => {
+    if (!currentModel?.id) {
+      toast({
+        title: "Error",
+        description: "Please select a model first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const relationshipId = oldEdge.data?.relationshipId;
+      
+      if (!relationshipId) {
+        console.error('Cannot reconnect edge: missing relationshipId');
+        toast({
+          title: "Error",
+          description: "Cannot reconnect this relationship.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Get the actual objectId from the node data for both source and target
+      const sourceNode = nodes.find(n => n.id === newConnection.source);
+      const targetNode = nodes.find(n => n.id === newConnection.target);
+      
+      if (!sourceNode?.data?.objectId || !targetNode?.data?.objectId) {
+        console.error('Cannot reconnect relationship: missing objectId in node data');
+        toast({
+          title: "Error",
+          description: "Invalid node data for reconnection.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Update relationship in database
+      const response = await fetch(`/api/relationships/${relationshipId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sourceModelObjectId: sourceNode.data.modelObjectId,
+          targetModelObjectId: targetNode.data.modelObjectId,
+          sourceHandle: newConnection.sourceHandle || null,
+          targetHandle: newConnection.targetHandle || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update relationship in database');
+      }
+
+      // Update edge in local state
+      setEdges((eds) =>
+        eds.map((edge) =>
+          edge.id === oldEdge.id
+            ? {
+                ...edge,
+                source: newConnection.source!,
+                target: newConnection.target!,
+                sourceHandle: newConnection.sourceHandle || undefined,
+                targetHandle: newConnection.targetHandle || undefined,
+              }
+            : edge
+        )
+      );
+
+      // Save to history
+      saveToHistory('relationship_reconnected', 'Reconnected relationship', 
+        `Changed relationship connection from ${oldEdge.source} → ${oldEdge.target} to ${newConnection.source} → ${newConnection.target}`);
+
+      // Invalidate canvas data to refresh
+      if (currentLayerModel?.id) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/models", currentLayerModel.id, "canvas", currentLayer]
+        });
+      }
+
+      toast({
+        title: "Relationship Reconnected",
+        description: "The relationship has been updated successfully.",
+      });
+
+    } catch (error) {
+      console.error('Failed to reconnect relationship:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reconnect relationship. Please try again.",
+        variant: "destructive"
+      });
+    }
+  }, [currentModel, nodes, setEdges, saveToHistory, currentLayerModel, currentLayer, queryClient, toast]);
+
   const onPaneClick = useCallback(() => {
     selectNode(null);
     selectEdge(null);
@@ -2272,6 +2381,7 @@ function CanvasComponent() {
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={onConnect}
+            onReconnect={onReconnect}
             onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
             onEdgeDoubleClick={onEdgeDoubleClick}
@@ -2279,23 +2389,26 @@ function CanvasComponent() {
             onDragOver={onDragOver}
             onDrop={onDrop}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             attributionPosition="bottom-left"
             connectionMode={connectionMode === 'connection' ? "loose" : "strict" as any}
             snapToGrid={true}
             snapGrid={[15, 15]}
-            connectionLineType={"smoothstep" as any}
+            connectionLineType={"step" as any}
             connectionLineStyle={{
               strokeWidth: 3,
               stroke: '#3b82f6',
               strokeDasharray: '5,5',
             }}
+            edgesFocusable={true}
+            reconnectRadius={20}
             defaultEdgeOptions={{
               style: {
                 strokeWidth: currentLayer === "conceptual" ? 3 : 2,
                 stroke: currentLayer === "conceptual" ? "#3b82f6" : "#6b7280",
               },
-              type: "smoothstep",
+              type: "step",
             }}
             className="w-full h-full bg-background dark:bg-background"
             style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}

@@ -60,10 +60,16 @@ export const createRelationshipRequestSchema = z.object({
 export const updateRelationshipRequestSchema = z
   .object({
     type: relationshipTypeEnum.optional(),
+    sourceModelObjectId: z.number().int().positive().optional(),
+    targetModelObjectId: z.number().int().positive().optional(),
     sourceAttributeId: z.number().int().positive().nullable().optional(),
     targetAttributeId: z.number().int().positive().nullable().optional(),
     sourceHandle: z.string().nullable().optional(),
     targetHandle: z.string().nullable().optional(),
+    waypoints: z.array(z.object({
+      x: z.number(),
+      y: z.number(),
+    })).nullable().optional(),
     name: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
     metadata: z.record(z.any()).nullable().optional(),
