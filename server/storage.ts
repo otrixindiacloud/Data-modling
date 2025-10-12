@@ -80,6 +80,7 @@ export interface IStorage {
   // Data Model Layers (child table - Flow, Conceptual, Logical, Physical)
   getDataModelLayers(): Promise<DataModelLayer[]>;
   getDataModelLayer(id: number): Promise<DataModelLayer | undefined>;
+  getDataModelLayerByModelAndKey(modelId: number, layerKey: string): Promise<DataModelLayer | undefined>;
   createDataModelLayer(layer: InsertDataModelLayer): Promise<DataModelLayer>;
   updateDataModelLayer(id: number, layer: Partial<InsertDataModelLayer>): Promise<DataModelLayer>;
   deleteDataModelLayer(id: number): Promise<void>;
@@ -88,6 +89,7 @@ export interface IStorage {
   getLayerObjectLinksByLayer(layerId: number): Promise<DataModelLayerObject[]>;
   linkDataModelObjectToLayer(link: InsertDataModelLayerObject): Promise<DataModelLayerObject>;
   unlinkDataModelObjectFromLayer(layerId: number, objectId: number): Promise<void>;
+  ensureAllLayerMappings(): Promise<{ processed: number; created: number }>;
 
   // Data Domains
   getDataDomains(): Promise<DataDomain[]>;
@@ -162,6 +164,7 @@ export interface IStorage {
   createDataModelObjectRelationship(relationship: InsertDataModelObjectRelationship): Promise<DataModelObjectRelationship>;
   updateDataModelObjectRelationship(id: number, relationship: Partial<InsertDataModelObjectRelationship>): Promise<DataModelObjectRelationship>;
   deleteDataModelObjectRelationship(id: number): Promise<void>;
+  cleanupOrphanedRelationships(modelId: number): Promise<{ deleted: number }>;
 
   // Systems
   getSystems(): Promise<System[]>;
@@ -230,6 +233,19 @@ export class Storage implements IStorage {
 
   async getDataModelLayer(id: number): Promise<DataModelLayer | undefined> {
     const result = await db.select().from(dataModelLayers).where(eq(dataModelLayers.id, id));
+    return result[0];
+  }
+
+  async getDataModelLayerByModelAndKey(modelId: number, layerKey: string): Promise<DataModelLayer | undefined> {
+    const result = await db
+      .select()
+      .from(dataModelLayers)
+      .where(
+        and(
+          eq(dataModelLayers.dataModelId, modelId),
+          eq(dataModelLayers.layer, layerKey)
+        )
+      );
     return result[0];
   }
 
@@ -391,6 +407,65 @@ export class Storage implements IStorage {
       );
   }
 
+  async updateLayerObjectPosition(
+    layerId: number, 
+    objectId: number, 
+    positionX: number, 
+    positionY: number
+  ): Promise<DataModelLayerObject | undefined> {
+    const result = await db
+      .update(dataModelLayerObjects)
+      .set({ 
+        positionX, 
+        positionY,
+        updatedAt: new Date()
+      })
+      .where(
+        and(
+          eq(dataModelLayerObjects.dataModelLayerId, layerId),
+          eq(dataModelLayerObjects.dataModelObjectId, objectId)
+        )
+      )
+      .returning();
+    return result[0];
+  }
+
+  async getLayerObjectPosition(
+    layerId: number,
+    objectId: number
+  ): Promise<{ positionX: number | null; positionY: number | null } | undefined> {
+    const result = await db
+      .select({
+        positionX: dataModelLayerObjects.positionX,
+        positionY: dataModelLayerObjects.positionY
+      })
+      .from(dataModelLayerObjects)
+      .where(
+        and(
+          eq(dataModelLayerObjects.dataModelLayerId, layerId),
+          eq(dataModelLayerObjects.dataModelObjectId, objectId)
+        )
+      );
+    return result[0];
+  }
+
+  async getLayerObjectsWithPositions(layerId: number): Promise<Array<{
+    id: number;
+    dataModelObjectId: number;
+    positionX: number | null;
+    positionY: number | null;
+  }>> {
+    return await db
+      .select({
+        id: dataModelLayerObjects.id,
+        dataModelObjectId: dataModelLayerObjects.dataModelObjectId,
+        positionX: dataModelLayerObjects.positionX,
+        positionY: dataModelLayerObjects.positionY
+      })
+      .from(dataModelLayerObjects)
+      .where(eq(dataModelLayerObjects.dataModelLayerId, layerId));
+  }
+
   // Data Domains
   async getDataDomains(): Promise<DataDomain[]> {
     return await db.select().from(dataDomains);
@@ -490,10 +565,13 @@ export class Storage implements IStorage {
   }
 
   private async ensureLayerMappingsForModelObject(modelObject: DataModelObject): Promise<void> {
+    // modelObject.modelId is actually a layer ID (references data_model_layers.id)
+    // We need to find all sibling layers in the same data model
     const layerRecord = await db
       .select({
         id: dataModelLayers.id,
         dataModelId: dataModelLayers.dataModelId,
+        layer: dataModelLayers.layer,
       })
       .from(dataModelLayers)
       .where(eq(dataModelLayers.id, modelObject.modelId))
@@ -501,26 +579,40 @@ export class Storage implements IStorage {
 
     const baseLayer = layerRecord[0];
     if (!baseLayer) {
+      console.warn(`[STORAGE] No layer found for modelObject.modelId: ${modelObject.modelId}`);
       return;
     }
 
+    console.log(`[STORAGE] Creating layer mappings for object ${modelObject.id} in data model ${baseLayer.dataModelId}`);
+
+    // Get all layers that belong to the same data model
     const siblingLayers = await db
-      .select({ id: dataModelLayers.id })
+      .select({ 
+        id: dataModelLayers.id,
+        layer: dataModelLayers.layer 
+      })
       .from(dataModelLayers)
       .where(eq(dataModelLayers.dataModelId, baseLayer.dataModelId));
 
     if (siblingLayers.length === 0) {
+      console.warn(`[STORAGE] No sibling layers found for data model ${baseLayer.dataModelId}`);
       return;
     }
 
+    console.log(`[STORAGE] Found ${siblingLayers.length} layers for data model ${baseLayer.dataModelId}:`, 
+      siblingLayers.map(l => `${l.id}:${l.layer}`).join(', '));
+
     const timestamp = new Date();
 
+    // Create entries in data_model_layer_objects for all layers
     await db
       .insert(dataModelLayerObjects)
       .values(
         siblingLayers.map((layer) => ({
           dataModelLayerId: layer.id,
           dataModelObjectId: modelObject.id,
+          positionX: null, // Will be set when user positions the object in each layer
+          positionY: null,
           createdAt: timestamp,
           updatedAt: timestamp,
         }))
@@ -528,6 +620,163 @@ export class Storage implements IStorage {
       .onConflictDoNothing({
         target: [dataModelLayerObjects.dataModelLayerId, dataModelLayerObjects.dataModelObjectId],
       });
+
+    console.log(`[STORAGE] Successfully created layer mappings for object ${modelObject.id} across ${siblingLayers.length} layers`);
+  }
+
+  /**
+   * Auto-populate model object relationships based on data object relationships
+   * Called when a new model object is created with an objectId reference
+   */
+  private async autoPopulateModelObjectRelationships(modelObject: DataModelObject): Promise<void> {
+    if (!modelObject.objectId) {
+      console.log(`[STORAGE] Skipping relationship auto-population - model object ${modelObject.id} has no objectId`);
+      return;
+    }
+
+    console.log(`[STORAGE] Auto-populating relationships for model object ${modelObject.id} (objectId: ${modelObject.objectId})`);
+
+    // Get the layer information
+    const layerRecord = await db
+      .select({
+        id: dataModelLayers.id,
+        dataModelId: dataModelLayers.dataModelId,
+        layer: dataModelLayers.layer,
+      })
+      .from(dataModelLayers)
+      .where(eq(dataModelLayers.id, modelObject.modelId))
+      .limit(1);
+
+    const baseLayer = layerRecord[0];
+    if (!baseLayer) {
+      console.warn(`[STORAGE] No layer found for modelObject.modelId: ${modelObject.modelId}`);
+      return;
+    }
+
+    // Get all data object relationships involving this object
+    const globalRelationships = await db
+      .select()
+      .from(dataObjectRelationships)
+      .where(
+        or(
+          eq(dataObjectRelationships.sourceDataObjectId, modelObject.objectId),
+          eq(dataObjectRelationships.targetDataObjectId, modelObject.objectId)
+        )
+      );
+
+    if (globalRelationships.length === 0) {
+      console.log(`[STORAGE] No data object relationships found for objectId ${modelObject.objectId}`);
+      return;
+    }
+
+    console.log(`[STORAGE] Found ${globalRelationships.length} data object relationships to process`);
+
+    // Get all model objects in the same model (layer)
+    const modelObjectsInSameModel = await this.getDataModelObjectsByModel(modelObject.modelId);
+    
+    // Create a map of objectId to modelObjectId for quick lookup
+    const objectIdToModelObjectId = new Map<number, number>();
+    modelObjectsInSameModel.forEach(mo => {
+      if (mo.objectId) {
+        objectIdToModelObjectId.set(mo.objectId, mo.id);
+      }
+    });
+
+    let created = 0;
+    let skipped = 0;
+
+    // Process each data object relationship
+    for (const dataRel of globalRelationships) {
+      const sourceModelObjectId = objectIdToModelObjectId.get(dataRel.sourceDataObjectId);
+      const targetModelObjectId = objectIdToModelObjectId.get(dataRel.targetDataObjectId);
+
+      // Both source and target must exist as model objects in the same model
+      if (!sourceModelObjectId || !targetModelObjectId) {
+        console.log(`[STORAGE] Skipping relationship - source (${dataRel.sourceDataObjectId}->${sourceModelObjectId || 'MISSING'}) or target (${dataRel.targetDataObjectId}->${targetModelObjectId || 'MISSING'}) not found in model`);
+        skipped++;
+        continue;
+      }
+
+      // Check if relationship already exists
+      const existingRelationships = await db
+        .select()
+        .from(dataModelObjectRelationships)
+        .where(
+          and(
+            eq(dataModelObjectRelationships.sourceModelObjectId, sourceModelObjectId),
+            eq(dataModelObjectRelationships.targetModelObjectId, targetModelObjectId),
+            eq(dataModelObjectRelationships.modelId, modelObject.modelId),
+            eq(dataModelObjectRelationships.relationshipLevel, dataRel.relationshipLevel)
+          )
+        );
+
+      if (existingRelationships.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      // Map global attribute IDs to model attribute IDs if it's an attribute-level relationship
+      let sourceModelAttributeId: number | null = null;
+      let targetModelAttributeId: number | null = null;
+
+      if (dataRel.relationshipLevel === "attribute" && dataRel.sourceAttributeId && dataRel.targetAttributeId) {
+        // Find model attributes that reference the global attributes
+        const sourceModelAttrs = await db
+          .select()
+          .from(dataModelObjectAttributes)
+          .where(
+            and(
+              eq(dataModelObjectAttributes.attributeId, dataRel.sourceAttributeId),
+              eq(dataModelObjectAttributes.modelObjectId, sourceModelObjectId)
+            )
+          );
+
+        const targetModelAttrs = await db
+          .select()
+          .from(dataModelObjectAttributes)
+          .where(
+            and(
+              eq(dataModelObjectAttributes.attributeId, dataRel.targetAttributeId),
+              eq(dataModelObjectAttributes.modelObjectId, targetModelObjectId)
+            )
+          );
+
+        if (sourceModelAttrs.length > 0 && targetModelAttrs.length > 0) {
+          sourceModelAttributeId = sourceModelAttrs[0].id;
+          targetModelAttributeId = targetModelAttrs[0].id;
+        } else {
+          // Can't create attribute-level relationship without both attributes
+          console.log(`[STORAGE] Skipping attribute relationship - model attributes not found for global attributes ${dataRel.sourceAttributeId} and ${dataRel.targetAttributeId}`);
+          skipped++;
+          continue;
+        }
+      }
+
+      // Create the model object relationship
+      const newRelationship: InsertDataModelObjectRelationship = {
+        sourceModelObjectId,
+        targetModelObjectId,
+        type: dataRel.type,
+        relationshipLevel: dataRel.relationshipLevel,
+        sourceAttributeId: sourceModelAttributeId,
+        targetAttributeId: targetModelAttributeId,
+        modelId: modelObject.modelId,
+        layer: baseLayer.layer ?? "conceptual",
+        name: dataRel.name,
+        description: dataRel.description,
+      };
+
+      try {
+        await db.insert(dataModelObjectRelationships).values(newRelationship);
+        created++;
+        console.log(`[STORAGE] Created model relationship: ${sourceModelObjectId} -> ${targetModelObjectId} (${dataRel.type})`);
+      } catch (error) {
+        console.error(`[STORAGE] Error creating model relationship:`, error);
+        skipped++;
+      }
+    }
+
+    console.log(`[STORAGE] Relationship auto-population complete: ${created} created, ${skipped} skipped`);
   }
 
   async getDataObjectsByModel(modelId: number): Promise<DataObject[]> {
@@ -636,7 +885,64 @@ export class Storage implements IStorage {
 
     await this.ensureLayerMappingsForModelObject(created);
 
+    // Auto-populate relationships if this is a system-synced object with objectId
+    if (created.objectId) {
+      await this.autoPopulateModelObjectRelationships(created);
+    }
+
     return created;
+  }
+
+  async createDataModelObjectsBatch(objects: InsertDataModelObject[]): Promise<DataModelObject[]> {
+    if (objects.length === 0) return [];
+    
+    // Batch enrichment: fetch all needed data objects at once
+    const objectIdsToFetch = objects
+      .filter(obj => obj.objectId && (!obj.name || !obj.description))
+      .map(obj => obj.objectId as number);
+    
+    const dataObjectsMap = new Map<number, DataObject>();
+    if (objectIdsToFetch.length > 0) {
+      // Fetch data objects in parallel for enrichment
+      // Note: We fetch individually but in parallel, which is still much better than sequential
+      const fetchedDataObjects = await Promise.all(
+        objectIdsToFetch.map(id => this.getDataObject(id))
+      );
+      
+      fetchedDataObjects.forEach((obj, idx) => {
+        if (obj) dataObjectsMap.set(objectIdsToFetch[idx], obj);
+      });
+    }
+    
+    // Enrich all objects
+    const enrichedObjects = objects.map(object => {
+      let enriched = { ...object };
+      if (object.objectId && dataObjectsMap.has(object.objectId)) {
+        const dataObject = dataObjectsMap.get(object.objectId)!;
+        if (!enriched.name) enriched.name = dataObject.name;
+        if (!enriched.description) enriched.description = dataObject.description;
+        if (!enriched.objectType) enriched.objectType = dataObject.objectType;
+        if (!enriched.domainId) enriched.domainId = dataObject.domainId;
+        if (!enriched.dataAreaId) enriched.dataAreaId = dataObject.dataAreaId;
+      }
+      return enriched;
+    });
+    
+    // Batch insert
+    const result = await db.insert(dataModelObjects).values(enrichedObjects).returning();
+    
+    // Batch layer mappings and relationship population (done in parallel)
+    await Promise.all(result.map(created => this.ensureLayerMappingsForModelObject(created)));
+    
+    // Auto-populate relationships for objects with objectId (in parallel)
+    const objectsWithRelationships = result.filter(created => created.objectId);
+    if (objectsWithRelationships.length > 0) {
+      await Promise.all(objectsWithRelationships.map(created => 
+        this.autoPopulateModelObjectRelationships(created)
+      ));
+    }
+    
+    return result;
   }
 
   async updateDataModelObject(id: number, object: Partial<InsertDataModelObject>): Promise<DataModelObject> {
@@ -698,6 +1004,12 @@ export class Storage implements IStorage {
   async createDataModelObjectAttribute(attribute: InsertDataModelObjectAttribute): Promise<DataModelObjectAttribute> {
     const result = await db.insert(dataModelObjectAttributes).values(attribute).returning();
     return result[0];
+  }
+
+  async createDataModelObjectAttributesBatch(attributes: InsertDataModelObjectAttribute[]): Promise<DataModelObjectAttribute[]> {
+    if (attributes.length === 0) return [];
+    const result = await db.insert(dataModelObjectAttributes).values(attributes).returning();
+    return result;
   }
 
   async updateDataModelObjectAttribute(id: number, attribute: Partial<InsertDataModelObjectAttribute>): Promise<DataModelObjectAttribute> {
@@ -810,6 +1122,14 @@ export class Storage implements IStorage {
     return result[0];
   }
 
+  async createDataModelObjectRelationshipsBatch(
+    relationships: InsertDataModelObjectRelationship[]
+  ): Promise<DataModelObjectRelationship[]> {
+    if (relationships.length === 0) return [];
+    const result = await db.insert(dataModelObjectRelationships).values(relationships).returning();
+    return result;
+  }
+
   async updateDataModelObjectRelationship(
     id: number,
     relationship: Partial<InsertDataModelObjectRelationship>
@@ -824,6 +1144,54 @@ export class Storage implements IStorage {
 
   async deleteDataModelObjectRelationship(id: number): Promise<void> {
     await db.delete(dataModelObjectRelationships).where(eq(dataModelObjectRelationships.id, id));
+  }
+
+  /**
+   * Clean up orphaned relationships in a model layer
+   * Removes relationships where either the source or target model object no longer exists
+   */
+  async cleanupOrphanedRelationships(modelId: number): Promise<{ deleted: number }> {
+    console.log(`[STORAGE] Cleaning up orphaned relationships for model ${modelId}`);
+    
+    // Get all relationships in this model
+    const relationships = await db
+      .select()
+      .from(dataModelObjectRelationships)
+      .where(eq(dataModelObjectRelationships.modelId, modelId));
+
+    console.log(`[STORAGE] Found ${relationships.length} relationships to check`);
+
+    // Get all valid model object IDs in this model
+    const modelObjects = await this.getDataModelObjectsByModel(modelId);
+    const validModelObjectIds = new Set(modelObjects.map(mo => mo.id));
+
+    console.log(`[STORAGE] Found ${validModelObjectIds.size} valid model objects in layer`);
+
+    // Find orphaned relationships
+    const orphanedRelationshipIds: number[] = [];
+    for (const rel of relationships) {
+      const sourceExists = validModelObjectIds.has(rel.sourceModelObjectId);
+      const targetExists = validModelObjectIds.has(rel.targetModelObjectId);
+
+      if (!sourceExists || !targetExists) {
+        console.log(`[STORAGE] Found orphaned relationship ${rel.id}: source ${rel.sourceModelObjectId} (${sourceExists ? 'OK' : 'MISSING'}), target ${rel.targetModelObjectId} (${targetExists ? 'OK' : 'MISSING'})`);
+        orphanedRelationshipIds.push(rel.id);
+      }
+    }
+
+    // Delete orphaned relationships
+    if (orphanedRelationshipIds.length > 0) {
+      for (const id of orphanedRelationshipIds) {
+        await db
+          .delete(dataModelObjectRelationships)
+          .where(eq(dataModelObjectRelationships.id, id));
+      }
+      console.log(`[STORAGE] Deleted ${orphanedRelationshipIds.length} orphaned relationships`);
+    } else {
+      console.log(`[STORAGE] No orphaned relationships found`);
+    }
+
+    return { deleted: orphanedRelationshipIds.length };
   }
 
   // Systems
@@ -1031,6 +1399,37 @@ export class Storage implements IStorage {
 
   async deleteCapabilitySystemMapping(id: number): Promise<void> {
     await db.delete(capabilitySystemMappings).where(eq(capabilitySystemMappings.id, id));
+  }
+
+  // Utility method to ensure all existing data model objects have layer mappings
+  async ensureAllLayerMappings(): Promise<{ processed: number; created: number }> {
+    console.log('[STORAGE] Starting ensureAllLayerMappings for existing objects...');
+    
+    const allModelObjects = await db.select().from(dataModelObjects);
+    let processed = 0;
+    let created = 0;
+
+    for (const modelObject of allModelObjects) {
+      try {
+        // Check if layer mappings exist for this object
+        const existing = await db
+          .select()
+          .from(dataModelLayerObjects)
+          .where(eq(dataModelLayerObjects.dataModelObjectId, modelObject.id));
+
+        if (existing.length === 0) {
+          console.log(`[STORAGE] Object ${modelObject.id} has no layer mappings, creating...`);
+          await this.ensureLayerMappingsForModelObject(modelObject);
+          created++;
+        }
+        processed++;
+      } catch (error) {
+        console.error(`[STORAGE] Error processing object ${modelObject.id}:`, error);
+      }
+    }
+
+    console.log(`[STORAGE] Completed: processed ${processed} objects, created mappings for ${created} objects`);
+    return { processed, created };
   }
 }
 

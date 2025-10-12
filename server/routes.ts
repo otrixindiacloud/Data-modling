@@ -372,7 +372,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/models/create-with-layers", async (req, res) => {
     try {
       const input: CreateModelWithLayersInput = req.body;
+      console.log('[ROUTES] Received create-with-layers request:', JSON.stringify(input, null, 2));
       const result = await createModelWithLayers(input, storage);
+      console.log('[ROUTES] Model creation result:', { 
+        objectsAdded: result.objectsAdded, 
+        templatesAdded: result.templatesAdded,
+        message: result.message 
+      });
       res.status(201).json(result);
     } catch (error: any) {
       console.error("Error creating model with layers:", error);
@@ -1948,6 +1954,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Cleanup orphaned relationships in a model layer
+  app.post("/api/models/:modelId/relationships/cleanup", async (req, res) => {
+    try {
+      const modelId = parseInt(req.params.modelId);
+      if (Number.isNaN(modelId)) {
+        return res.status(400).json({ message: "Invalid model id" });
+      }
+
+      const result = await storage.cleanupOrphanedRelationships(modelId);
+      res.json({
+        success: true,
+        message: `Cleaned up ${result.deleted} orphaned relationships`,
+        deleted: result.deleted
+      });
+    } catch (error) {
+      console.error("Failed to cleanup orphaned relationships:", error);
+      res.status(500).json({ message: "Failed to cleanup orphaned relationships" });
+    }
+  });
+
   // Systems (backward compatible with /api/sources route)
   app.get("/api/sources", async (req, res) => {
     try {
@@ -2448,17 +2474,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Canvas endpoints for ReactFlow integration
   app.get("/api/models/:id/canvas", async (req, res) => {
-    const modelId = parseInt(req.params.id);
-    const layer = req.query.layer as string || "conceptual";
+    const layerId = parseInt(req.params.id); // This is actually a layer ID (data_model_layers.id)
+    const layerKey = req.query.layer as string || "conceptual";
     
     try {
-  // Get only the objects that belong to this model and are visible in this layer
-  const modelObjects = await storage.getDataModelObjectsByModel(modelId);
+  // Get the layer record first
+  const currentLayer = await storage.getDataModelLayer(layerId);
+  if (!currentLayer) {
+    return res.status(404).json({ message: "Layer not found" });
+  }
+  
+  // Find the sibling layer with the requested layer key
+  const targetLayer = await storage.getDataModelLayerByModelAndKey(currentLayer.dataModelId, layerKey);
+  const targetLayerId = targetLayer?.id;
+  
+  console.log(`[CANVAS] Fetching canvas for layer ${layerId}, switching to ${layerKey}, targetLayerId: ${targetLayerId}`);
+  
+  // Clean up any orphaned relationships before fetching canvas data
+  await storage.cleanupOrphanedRelationships(layerId);
+  
+  // Get only the objects that belong to this layer and are visible
+  const modelObjects = await storage.getDataModelObjectsByModel(layerId);
   const visibleModelObjects = modelObjects.filter(mo => mo.isVisible !== false);
   
-  // Get model attributes for all model objects in this model
+  // Get model attributes for all model objects in this layer
   const allModelAttributes = await storage.getDataModelObjectAttributes();
-  const modelAttributes = allModelAttributes.filter(attr => attr.modelId === modelId);
+  const modelAttributes = allModelAttributes.filter(attr => attr.modelId === layerId);
   const modelAttributesByModelObjectId = new Map<number, typeof modelAttributes>();
   modelAttributes.forEach((attr: typeof modelAttributes[0]) => {
     const list = modelAttributesByModelObjectId.get(attr.modelObjectId) ?? [];
@@ -2466,8 +2507,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     modelAttributesByModelObjectId.set(attr.modelObjectId, list);
   });
       
-  const relationships = await storage.getDataModelObjectRelationshipsByModel(modelId);
-  console.log(`[CANVAS] Found ${relationships.length} relationships for model ${modelId}`);
+  const relationships = await storage.getDataModelObjectRelationshipsByModel(layerId);
+  console.log(`[CANVAS] Found ${relationships.length} relationships for layer ${layerId}`);
   const modelObjectsById = new Map(modelObjects.map(mo => [mo.id, mo]));
   const relevantObjectIds = new Set(modelObjects.map(mo => mo.objectId).filter((id): id is number => id !== null));
   const dataObjectRelationships = await storage.getDataObjectRelationships();
@@ -2493,10 +2534,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       globalRelationshipMap.set(key, relationship);
     }
   }
-      
+  
+  // OPTIMIZATION: Batch fetch all domains, areas, systems, and data objects
+  console.log(`[CANVAS] Batch fetching reference data...`);
+  const [allDomains, allDataAreas, allSystems, allDataObjects] = await Promise.all([
+    storage.getDataDomains(),
+    storage.getDataAreas(),
+    storage.getSystems(),
+    // Only fetch data objects that have IDs in our model objects
+    Promise.all(
+      Array.from(relevantObjectIds).map(id => storage.getDataObject(id))
+    ).then(results => results.filter((obj): obj is NonNullable<typeof obj> => obj !== null))
+  ]);
+  
+  // Build lookup maps for O(1) access
+  const domainsById = new Map(allDomains.map(d => [d.id, d]));
+  const areasById = new Map(allDataAreas.map(a => [a.id, a]));
+  const systemsById = new Map(allSystems.map(s => [s.id, s]));
+  const dataObjectsById = new Map(allDataObjects.map(o => [o.id, o]));
+  
+  // OPTIMIZATION: Batch fetch layer positions if we're switching layers
+  let layerPositionsMap = new Map<number, { positionX: number | null; positionY: number | null }>();
+  if (targetLayerId) {
+    console.log(`[CANVAS] Batch fetching layer positions for layer ${targetLayerId}...`);
+    const layerPositions = await storage.getLayerObjectLinksByLayer(targetLayerId);
+    layerPositions.forEach(pos => {
+      layerPositionsMap.set(pos.dataModelObjectId, {
+        positionX: pos.positionX,
+        positionY: pos.positionY
+      });
+    });
+  }
+  
       // Get attributes for each object and include domain/area information
       // ALL objects on canvas are rendered from data_model_objects table only
-      const nodes = await Promise.all(visibleModelObjects.map(async modelObj => {
+      const nodes = visibleModelObjects.map(modelObj => {
         // All objects - data is in data_model_objects
         const modelAttrs = modelAttributesByModelObjectId.get(modelObj.id) ?? [];
         
@@ -2506,7 +2578,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let objectType = modelObj.objectType;
         
         if (modelObj.objectId && !objectName) {
-          const dataObject = await storage.getDataObject(modelObj.objectId);
+          const dataObject = dataObjectsById.get(modelObj.objectId);
           if (dataObject) {
             objectName = dataObject.name;
             objectDescription = objectDescription || dataObject.description;
@@ -2514,37 +2586,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
-        // Get domain and area information
+        // Get domain and area information (now from cached maps)
         let domainName, domainColor, dataAreaName;
         if (modelObj.domainId) {
-          const domain = await storage.getDataDomain(modelObj.domainId);
+          const domain = domainsById.get(modelObj.domainId);
           domainName = domain?.name;
           domainColor = domain?.colorCode;
         }
         if (modelObj.dataAreaId) {
-          const dataArea = await storage.getDataArea(modelObj.dataAreaId);
+          const dataArea = areasById.get(modelObj.dataAreaId);
           dataAreaName = dataArea?.name;
         }
         
-        // Get source and target system names
+        // Get source and target system names (now from cached map)
         let sourceSystemName, targetSystemName;
         if (modelObj.sourceSystemId) {
-          const sourceSystem = await storage.getSystem(modelObj.sourceSystemId);
+          const sourceSystem = systemsById.get(modelObj.sourceSystemId);
           sourceSystemName = sourceSystem?.name;
         }
         if (modelObj.targetSystemId) {
-          const targetSystem = await storage.getSystem(modelObj.targetSystemId);
+          const targetSystem = systemsById.get(modelObj.targetSystemId);
           targetSystemName = targetSystem?.name;
         }
         
-        // Get position from model object
-        let position = modelObj.position || { x: 100, y: 100 };
-        if (typeof position === 'string') {
-          try {
-            position = JSON.parse(position);
-          } catch (e) {
-            console.warn("Failed to parse position:", position);
-            position = { x: 100, y: 100 };
+        // Get position from layer-specific storage (data_model_layer_objects table)
+        let position = { x: 100, y: 100 }; // Default position
+        
+        if (targetLayerId) {
+          const layerPosition = layerPositionsMap.get(modelObj.id);
+          
+          if (layerPosition && layerPosition.positionX !== null && layerPosition.positionY !== null) {
+            // Use layer-specific position if available
+            position = { 
+              x: layerPosition.positionX, 
+              y: layerPosition.positionY 
+            };
+          } else if (modelObj.position) {
+            // Fallback to old position storage for backward compatibility
+            if (typeof modelObj.position === 'string') {
+              try {
+                position = JSON.parse(modelObj.position);
+              } catch (e) {
+                console.warn("Failed to parse position:", modelObj.position);
+              }
+            } else {
+              position = modelObj.position;
+            }
+          }
+        } else if (modelObj.position) {
+          // Fallback to old position storage for backward compatibility
+          if (typeof modelObj.position === 'string') {
+            try {
+              position = JSON.parse(modelObj.position);
+            } catch (e) {
+              console.warn("Failed to parse position:", modelObj.position);
+            }
+          } else {
+            position = modelObj.position;
           }
         }
         
@@ -2589,42 +2687,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
             commonProperties: null, // Legacy field for compatibility
           },
         };
-      }));
+      });
       
       // All nodes are valid (from data_model_objects only)
       const validNodes = nodes;
       
       // Filter relationships based on layer
       let filteredRelationships = relationships;
-      if (layer === "conceptual") {
+      if (layerKey === "conceptual") {
         // In conceptual layer, show only object-to-object relationships (no attribute-specific relationships)
         filteredRelationships = relationships.filter(rel => !rel.sourceAttributeId && !rel.targetAttributeId);
-      } else if (layer === "logical" || layer === "physical") {
+      } else if (layerKey === "logical" || layerKey === "physical") {
         // In logical and physical layers, show only attribute-level relationships
         filteredRelationships = relationships.filter(rel => rel.sourceAttributeId && rel.targetAttributeId);
       }
       
-      const edges = await Promise.all(filteredRelationships.map(async rel => {
-        // Get the actual object IDs from the model objects
-        const sourceModelObject = modelObjectsById.get(rel.sourceModelObjectId) ?? (await storage.getDataModelObject(rel.sourceModelObjectId));
-        const targetModelObject = modelObjectsById.get(rel.targetModelObjectId) ?? (await storage.getDataModelObject(rel.targetModelObjectId));
+      // OPTIMIZATION: Batch fetch all model attributes needed for relationships
+      const uniqueModelAttrIds = new Set<number>();
+      filteredRelationships.forEach(rel => {
+        if (rel.sourceAttributeId) uniqueModelAttrIds.add(rel.sourceAttributeId);
+        if (rel.targetAttributeId) uniqueModelAttrIds.add(rel.targetAttributeId);
+      });
+      
+      const modelAttributesForRelationships = await Promise.all(
+        Array.from(uniqueModelAttrIds).map(id => storage.getDataModelObjectAttribute(id))
+      );
+      const modelAttrMap = new Map(
+        modelAttributesForRelationships
+          .filter((attr): attr is DataModelObjectAttribute => attr !== undefined)
+          .map(attr => [attr.id, attr])
+      );
+      
+      const edges = filteredRelationships.map(rel => {
+        // Get the actual object IDs from the model objects (already in map)
+        const sourceModelObject = modelObjectsById.get(rel.sourceModelObjectId);
+        const targetModelObject = modelObjectsById.get(rel.targetModelObjectId);
         
         if (!sourceModelObject || !targetModelObject) {
-          console.warn(`Missing model objects for relationship ${rel.id}`);
+          console.warn(`[CANVAS] Missing model objects for relationship ${rel.id}:`);
+          console.warn(`  - Source model object ${rel.sourceModelObjectId}: ${sourceModelObject ? 'EXISTS' : 'MISSING'} ${sourceModelObject ? `(layer: ${sourceModelObject.modelId})` : ''}`);
+          console.warn(`  - Target model object ${rel.targetModelObjectId}: ${targetModelObject ? 'EXISTS' : 'MISSING'} ${targetModelObject ? `(layer: ${targetModelObject.modelId})` : ''}`);
+          console.warn(`  - Relationship is in layer: ${rel.modelId}`);
+          console.warn(`  - Current viewing layer: ${layerId}`);
           return null;
         }
 
-        // Resolve model attribute IDs to global attribute IDs for the UI
+        // Resolve model attribute IDs to global attribute IDs for the UI (from cached map)
         let globalSourceAttributeId = null;
         let globalTargetAttributeId = null;
         
         if (rel.sourceAttributeId) {
-          const sourceModelAttr = await storage.getDataModelAttribute(rel.sourceAttributeId);
+          const sourceModelAttr = modelAttrMap.get(rel.sourceAttributeId);
           globalSourceAttributeId = sourceModelAttr?.attributeId ?? null;
         }
         
         if (rel.targetAttributeId) {
-          const targetModelAttr = await storage.getDataModelAttribute(rel.targetAttributeId);
+          const targetModelAttr = modelAttrMap.get(rel.targetAttributeId);
           globalTargetAttributeId = targetModelAttr?.attributeId ?? null;
         }
 
@@ -2664,7 +2782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             dataObjectRelationshipId,
           }
         };
-      }));
+      });
 
       // Filter out null edges
       const validEdges = edges.filter(edge => edge !== null);
@@ -2683,24 +2801,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Canvas position saving endpoint
   app.post("/api/models/:id/canvas/positions", async (req, res) => {
     try {
-  const modelId = parseInt(req.params.id);
+  const layerId = parseInt(req.params.id); // This is actually a layer ID (data_model_layers.id)
   const { positions, layer } = req.body; // Array of { modelObjectId?: number, objectId?: number, position: { x: number, y: number } }
       
       if (!Array.isArray(positions)) {
         return res.status(400).json({ message: "Positions must be an array" });
       }
       
-      // Get all model objects for this model to validate they exist
-  const modelObjects = await storage.getDataModelObjectsByModel(modelId);
+      // Determine the layer key for backward compatibility
+      const layerKey = typeof layer === 'string' && layer.length > 0
+        ? layer
+        : 'conceptual';
+      
+      // Get the current layer record first
+      const currentLayer = await storage.getDataModelLayer(layerId);
+      if (!currentLayer) {
+        return res.status(404).json({ message: "Layer not found" });
+      }
+      
+      // Find the sibling layer with the requested layer key
+      const targetLayer = await storage.getDataModelLayerByModelAndKey(currentLayer.dataModelId, layerKey);
+      const targetLayerId = targetLayer?.id;
+      
+      if (!targetLayerId) {
+        console.error(`[CANVAS] Layer not found for data model ${currentLayer.dataModelId} and layer key ${layerKey}`);
+        return res.status(404).json({ message: `Layer ${layerKey} not found for data model ${currentLayer.dataModelId}` });
+      }
+      
+      console.log(`[CANVAS] Saving positions for layer ${layerId}, switching to ${layerKey}, targetLayerId: ${targetLayerId}`);
+      
+      // Get all model objects for this layer to validate they exist
+  const modelObjects = await storage.getDataModelObjectsByModel(layerId);
   const modelObjectsByObjectId = new Map(modelObjects.map(mo => [mo.objectId, mo]));
   const modelObjectsById = new Map(modelObjects.map(mo => [mo.id, mo]));
       
-      // Filter positions to only include objects that exist in this model
+      // Filter positions to only include objects that exist in this layer
       const validPositions = positions.filter(({ objectId, modelObjectId }) => {
         if (typeof modelObjectId === 'number') {
           const exists = modelObjectsById.has(modelObjectId);
           if (!exists) {
-            console.warn(`Model object ${modelObjectId} not found in model ${modelId}, skipping position update`);
+            console.warn(`Model object ${modelObjectId} not found in layer ${layerId}, skipping position update`);
           }
           return exists;
         }
@@ -2708,7 +2848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (typeof objectId === 'number') {
           const exists = modelObjectsByObjectId.has(objectId);
           if (!exists) {
-            console.warn(`Object ${objectId} not found in model ${modelId}, skipping position update`);
+            console.warn(`Object ${objectId} not found in layer ${layerId}, skipping position update`);
           }
           return exists;
         }
@@ -2721,7 +2861,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, message: "No valid positions to save", skipped: positions.length });
       }
       
-      // Update each model object's layer-specific position in the layer_specific_config
+      // Update each model object's layer-specific position in the data_model_layer_objects table
       const updates = validPositions.map(async ({ objectId, modelObjectId, position }) => {
         if (!position || typeof position.x !== 'number' || typeof position.y !== 'number') {
           throw new Error(`Invalid position data for payload ${JSON.stringify({ objectId, modelObjectId })}`);
@@ -2739,43 +2879,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new Error(`Model object not found for payload ${JSON.stringify({ objectId, modelObjectId })}`);
         }
         
-        // Get the current model object to preserve existing config
-        const currentModelObject = await storage.getDataModelObject(modelObject.id);
-        if (!currentModelObject) {
-          throw new Error(`Model object ${modelObject.id} not found`);
-        }
+        // Save position to data_model_layer_objects table for layer-specific storage
+        await storage.updateLayerObjectPosition(
+          targetLayerId, // Use the target layer ID from data_model_layers
+          modelObject.id, // This is the model object ID
+          position.x,
+          position.y
+        );
         
-        // Update the layer-specific configuration with the new position
-        let layerConfig = {};
-        if (currentModelObject.layerSpecificConfig && typeof currentModelObject.layerSpecificConfig === 'object') {
-          layerConfig = { ...currentModelObject.layerSpecificConfig };
-        }
+        // console.log(`[CANVAS] Saved position for object ${modelObject.id} in layer ${layerKey} (targetLayerId: ${targetLayerId}): (${position.x}, ${position.y})`);
 
-        const layerKey = typeof layer === 'string' && layer.length > 0
-          ? layer
-          : (typeof (layerConfig as any).layer === 'string' ? (layerConfig as any).layer : 'conceptual');
-
-        const existingLayers = (layerConfig as any).layers && typeof (layerConfig as any).layers === 'object'
-          ? { ...(layerConfig as any).layers }
-          : {};
-
-        const nextLayerConfig = {
-          ...existingLayers[layerKey],
-          position
-        };
-
-        const updatedConfig = {
-          ...layerConfig,
-          position, // maintain backwards compatibility
-          layers: {
-            ...existingLayers,
-            [layerKey]: nextLayerConfig
-          },
-          lastUpdatedLayer: layerKey
-        } as Record<string, any>;
-
-        const result = await storage.updateDataModelObject(modelObject.id, { 
-          layerSpecificConfig: updatedConfig,
+        // Also update data_model_objects.position for backward compatibility
+        // This maintains the old position field while we transition
+        await storage.updateDataModelObject(modelObject.id, { 
           position
         });
 
@@ -2786,7 +2902,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        return result;
+        return modelObject;
       });
       
       await Promise.all(updates);
@@ -3449,6 +3565,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Utility endpoint to ensure all existing objects have layer mappings
+  app.post("/api/admin/ensure-layer-mappings", async (req, res) => {
+    try {
+      console.log('[API] Starting layer mappings sync...');
+      const result = await storage.ensureAllLayerMappings();
+      console.log(`[API] Layer mappings sync completed:`, result);
+      res.json({
+        success: true,
+        message: `Processed ${result.processed} objects, created mappings for ${result.created} objects`,
+        ...result
+      });
+    } catch (error) {
+      console.error('[API] Error ensuring layer mappings:', error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to ensure layer mappings",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
   const httpServer = createServer(app);
+  
+  // Run layer mappings sync on server startup for existing data
+  console.log('[STARTUP] Ensuring layer mappings for existing objects...');
+  storage.ensureAllLayerMappings()
+    .then(result => {
+      console.log(`[STARTUP] Layer mappings sync completed:`, result);
+    })
+    .catch(error => {
+      console.error('[STARTUP] Error ensuring layer mappings:', error);
+    });
+  
   return httpServer;
 }

@@ -40,6 +40,8 @@ interface EnhancedPropertiesPanelProps {
   onClose?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onSaveCanvas?: () => void;
+  canvasSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
 }
 
 interface AttributeFormData {
@@ -71,7 +73,7 @@ const dataTypes = {
   ]
 };
 
-export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, onToggleCollapse }: EnhancedPropertiesPanelProps) {
+export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, onToggleCollapse, onSaveCanvas, canvasSaveStatus = 'idle' }: EnhancedPropertiesPanelProps) {
   const { selectedObjectId, requireModelBeforeAction } = useModelerStore();
   const [activeTab, setActiveTab] = useState("properties");
   const [isAddingAttribute, setIsAddingAttribute] = useState(false);
@@ -583,6 +585,20 @@ export default function EnhancedPropertiesPanel({ onClose, isCollapsed = false, 
             </h2>
           </div>
           <div className="flex items-center gap-1">
+            {onSaveCanvas && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={onSaveCanvas}
+                className="h-7 text-xs"
+                disabled={canvasSaveStatus === 'saving'}
+                title="Save canvas state"
+                data-testid="button-save-canvas"
+              >
+                <Save className={`h-3 w-3 mr-1 ${canvasSaveStatus === 'saving' ? 'animate-spin' : ''}`} />
+                {canvasSaveStatus === 'saving' ? 'Saving...' : canvasSaveStatus === 'saved' ? 'Saved' : 'Save'}
+              </Button>
+            )}
             {onToggleCollapse && (
               <Button
                 variant="ghost"

@@ -17,7 +17,7 @@ export const systemObjectUpdateSchema = z.object({
 });
 
 export const systemSyncRequestSchema = z.object({
-  modelId: z.number().int().positive(),
+  modelId: z.number().int().positive().optional(), // Optional - if provided, objects will be added to this model layer
   direction: z.enum(["source", "target"] as const).default("source").optional(),
   includeAttributes: z.boolean().default(true).optional(),
   domainId: z.number().int().positive().nullable().optional(),

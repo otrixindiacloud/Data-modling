@@ -142,6 +142,15 @@ function CanvasComponent() {
     console.log('🔔 Stack trace:', new Error().stack);
   }, [saveStatus]);
 
+  // Broadcast save status changes to parent components
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("canvasSaveStatus", {
+        detail: { status: saveStatus }
+      }));
+    }
+  }, [saveStatus]);
+
   // New state for attribute relationship modal
   const [showAttributeRelationshipModal, setShowAttributeRelationshipModal] = useState(false);
   const [attributeConnection, setAttributeConnection] = useState<{
@@ -1041,6 +1050,19 @@ function CanvasComponent() {
       });
     }, 300);
   }, [currentLayer, currentLayerModel?.id, currentModel?.id, savePositionsMutation, setNodes, setSaveStatus]);
+  
+  // Listen for manual save requests from properties panel
+  useEffect(() => {
+    const handleManualSave = () => {
+      console.log('📢 Manual save requested from properties panel');
+      queuePositionSave('manual_save_button');
+    };
+
+    window.addEventListener('manualCanvasSave', handleManualSave);
+    return () => {
+      window.removeEventListener('manualCanvasSave', handleManualSave);
+    };
+  }, [queuePositionSave]);
   
   const handleNodesChange = useCallback((changes: any[]) => {
     console.log('🚨 handleNodesChange CALLED - TOP OF FUNCTION');

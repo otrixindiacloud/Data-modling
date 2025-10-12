@@ -193,12 +193,9 @@ export default function LayerNavigator() {
                       }
 
                       setCurrentLayer(layer);
-
-                      if (typeof window !== "undefined") {
-                        setTimeout(() => {
-                          window.location.reload();
-                        }, 50);
-                      }
+                      
+                      // No page reload needed - React Query will automatically refetch canvas data
+                      // with layer-specific positions from data_model_layer_objects table
                     }}
                     disabled={!isAvailable}
                     className="h-9 w-9 p-0 relative"

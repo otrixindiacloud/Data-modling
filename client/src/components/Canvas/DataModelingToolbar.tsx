@@ -179,18 +179,6 @@ export default function DataModelingToolbar({
             <div className="mb-3 p-2">
               <DropdownMenuLabel className="text-xs font-medium text-muted-foreground mb-2">ACTIONS</DropdownMenuLabel>
               <div className="space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onAddObject();
-                    setIsToolboxOpen(false);
-                  }}
-                  className="w-full justify-start touch-target touch-button hover:bg-green-50 hover:border-green-200 hover:text-green-700 dark:hover:bg-green-950"
-                >
-                  <GitBranch className="h-4 w-4 mr-2" />
-                  Add Data Object
-                </Button>
 
                 {onToggleSearch && (
                   <Button
@@ -323,7 +311,7 @@ export default function DataModelingToolbar({
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        
+
         {/* Auto-Save Status - Always visible */}
         <div className={`
           px-3 py-1.5 rounded-md shadow-sm backdrop-blur-md border text-xs font-medium 

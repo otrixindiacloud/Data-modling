@@ -12,7 +12,7 @@ import { systemSyncRequestSchema, type SystemObjectDirection } from "./validatio
 
 export interface SyncSystemObjectsInput {
   systemId: number;
-  modelId: number;
+  modelId?: number; // Optional - if provided, objects will be added to this model layer
   direction?: SystemObjectDirection;
   includeAttributes?: boolean;
   domainId?: number | null;
@@ -74,10 +74,13 @@ export async function syncSystemObjects(
     throw new Error("System cannot act as a target");
   }
 
-  // Validate model exists
-  const model = await storage.getDataModel(modelId);
-  if (!model) {
-    throw new Error("Model not found");
+  // Validate model exists (if provided, objects will be added to this model layer)
+  let targetLayer = null;
+  if (modelId) {
+    targetLayer = await storage.getDataModelLayer(modelId);
+    if (!targetLayer) {
+      throw new Error("Model layer not found");
+    }
   }
 
   // Resolve domain and data area
@@ -134,7 +137,8 @@ export async function syncSystemObjects(
   }
 
   // Build object registry and identify existing objects
-  const existingObjects = await storage.getDataObjectsByModel(modelId);
+  // Get all data objects (not model-specific, as sync creates global objects)
+  const existingObjects = await storage.getAllDataObjects();
   const relevantExisting = new Map<string, DataObject>();
   const objectRegistry = new Map<string, DataObject>();
 
@@ -234,6 +238,34 @@ export async function syncSystemObjects(
       objectRegistry,
       loadAttributesForObject
     );
+
+  // If a model layer was provided, automatically add all synced objects to that layer
+  if (targetLayer) {
+    console.log(`[SYNC] Adding ${created.length + updated.length} synced objects to model layer ${modelId}`);
+    
+    const allSyncedObjects = [...created, ...updated];
+    for (const dataObject of allSyncedObjects) {
+      try {
+        // Create a data_model_object entry for this data_object in the specified layer
+        await storage.createDataModelObject({
+          objectId: dataObject.id, // Reference to the global data_object
+          modelId: targetLayer.id, // The model layer ID
+          name: dataObject.name,
+          description: dataObject.description,
+          objectType: dataObject.objectType,
+          domainId: dataObject.domainId,
+          dataAreaId: dataObject.dataAreaId,
+          sourceSystemId: direction === "source" ? systemId : null,
+          targetSystemId: direction === "target" ? systemId : null,
+          isVisible: true,
+        });
+        console.log(`[SYNC] Added object "${dataObject.name}" to model layer`);
+      } catch (error) {
+        // Object might already exist in the model layer - that's okay
+        console.log(`[SYNC] Object "${dataObject.name}" may already exist in model layer:`, error instanceof Error ? error.message : 'Unknown error');
+      }
+    }
+  }
 
   return {
     metadataCount: metadata.length,

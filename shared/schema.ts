@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, jsonb, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, jsonb, timestamp, uniqueIndex, doublePrecision } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -163,6 +163,8 @@ export const dataModelLayerObjects = pgTable(
     dataModelObjectId: integer("data_model_object_id")
       .references(() => dataModelObjects.id, { onDelete: "cascade" })
       .notNull(),
+    positionX: doublePrecision("position_x"),
+    positionY: doublePrecision("position_y"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

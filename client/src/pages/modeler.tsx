@@ -74,6 +74,14 @@ export default function ModelerPage() {
   const { widths, updateWidths } = usePanelWidths();
   const [showModelRequiredModal, setShowModelRequiredModal] = useState(false);
   const [modelRequiredMessage, setModelRequiredMessage] = useState<string | null>(null);
+  const [canvasSaveStatus, setCanvasSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Handler to trigger manual canvas save
+  const handleSaveCanvas = () => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("manualCanvasSave"));
+    }
+  };
 
   // Load domains
   const { data: domains } = useQuery({
@@ -259,6 +267,21 @@ export default function ModelerPage() {
     };
   }, []);
 
+  // Listen for canvas save status changes
+  useEffect(() => {
+    const handleCanvasSaveStatus = (event: CustomEvent) => {
+      const status = event.detail?.status as 'idle' | 'saving' | 'saved' | 'error';
+      if (status) {
+        setCanvasSaveStatus(status);
+      }
+    };
+
+    window.addEventListener('canvasSaveStatus', handleCanvasSaveStatus as EventListener);
+    return () => {
+      window.removeEventListener('canvasSaveStatus', handleCanvasSaveStatus as EventListener);
+    };
+  }, []);
+
   const handleToggleDataExplorer = () => {
     setDataExplorerCollapsed(!dataExplorerCollapsed);
   };
@@ -380,6 +403,8 @@ export default function ModelerPage() {
                 <EnhancedPropertiesPanel
                   isCollapsed={propertiesCollapsed}
                   onToggleCollapse={handleToggleProperties}
+                  onSaveCanvas={handleSaveCanvas}
+                  canvasSaveStatus={canvasSaveStatus}
                 />
               </div>
             </Panel>
@@ -501,7 +526,11 @@ export default function ModelerPage() {
               <SheetTitle className="text-left">Properties</SheetTitle>
             </SheetHeader>
             <div className="h-full overflow-hidden">
-              <EnhancedPropertiesPanel onClose={() => setShowMobileProperties(false)} />
+              <EnhancedPropertiesPanel 
+                onClose={() => setShowMobileProperties(false)} 
+                onSaveCanvas={handleSaveCanvas}
+                canvasSaveStatus={canvasSaveStatus}
+              />
             </div>
           </SheetContent>
         </Sheet>

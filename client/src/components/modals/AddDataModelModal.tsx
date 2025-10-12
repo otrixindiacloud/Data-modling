@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -27,9 +27,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import type { DataArea, DataDomain, System } from "@shared/schema";
+import type { DataArea, DataDomain, System, DataObject } from "@shared/schema";
 import { useModelerStore } from "@/store/modelerStore";
 
 const formSchema = z.object({
@@ -52,6 +55,10 @@ export default function AddDataModelModal({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { setCurrentModel } = useModelerStore();
+
+  // Track selected data objects
+  const [selectedObjectIds, setSelectedObjectIds] = useState<number[]>([]);
+  const [selectAll, setSelectAll] = useState(true);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -100,12 +107,55 @@ export default function AddDataModelModal({
     },
   });
 
+  // Fetch all data objects
+  const { data: allDataObjects = [], isLoading: objectsLoading } = useQuery<DataObject[]>({
+    queryKey: ["/api/objects"],
+    queryFn: async () => {
+      const response = await fetch("/api/objects");
+      if (!response.ok) {
+        throw new Error("Failed to fetch data objects");
+      }
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    },
+  });
+
   const selectedDomainId = form.watch("domainId");
+  const selectedDataAreaId = form.watch("dataAreaId");
+  const selectedTargetSystemId = form.watch("targetSystemId");
+
   const filteredDataAreas = useMemo(() => {
     if (!selectedDomainId) return dataAreas;
     const domainIdNum = Number(selectedDomainId);
     return dataAreas.filter((area) => area.domainId === domainIdNum);
   }, [dataAreas, selectedDomainId]);
+
+  // Filter data objects based on selected domain, area, and system
+  const filteredDataObjects = useMemo(() => {
+    if (!selectedDomainId) return [];
+    
+    const filtered = allDataObjects.filter((obj) => {
+      const domainMatch = obj.domainId === Number(selectedDomainId);
+      const areaMatch = !selectedDataAreaId || obj.dataAreaId === Number(selectedDataAreaId);
+      const systemMatch = !selectedTargetSystemId || obj.systemId === Number(selectedTargetSystemId);
+      
+      return domainMatch && areaMatch && systemMatch;
+    });
+    
+    console.log('[AddDataModelModal] Filtered data objects:', filtered.length, filtered.map(o => ({ id: o.id, name: o.name })));
+    return filtered;
+  }, [allDataObjects, selectedDomainId, selectedDataAreaId, selectedTargetSystemId]);
+
+  // Auto-select all filtered objects when filters change
+  useEffect(() => {
+    if (filteredDataObjects.length > 0 && selectAll) {
+      const ids = filteredDataObjects.map(obj => obj.id);
+      console.log('[AddDataModelModal] Auto-selecting object IDs:', ids);
+      setSelectedObjectIds(ids);
+    } else if (filteredDataObjects.length === 0) {
+      setSelectedObjectIds([]);
+    }
+  }, [filteredDataObjects, selectAll]);
 
   useEffect(() => {
     if (!systemsLoading && systems.length > 0 && !form.getValues("targetSystemId")) {
@@ -154,7 +204,10 @@ export default function AddDataModelModal({
         targetSystemId: Number(data.targetSystemId),
         domainId: Number(data.domainId),
         dataAreaId: Number(data.dataAreaId),
+        selectedObjectIds: selectedObjectIds, // Include selected object IDs
       };
+      console.log('[AddDataModelModal] Sending payload:', payload);
+      console.log('[AddDataModelModal] Selected object IDs:', selectedObjectIds);
       const response = await apiRequest("POST", "/api/models/create-with-layers", payload);
       return response.json();
     },
@@ -166,10 +219,15 @@ export default function AddDataModelModal({
         setCurrentModel(responseData.conceptual ?? responseData.flow);
       }
       
+      // Show appropriate success message
+      const description = responseData.message || 
+        "Data model created with Flow, Conceptual, Logical, and Physical layers.";
+      
       toast({
         title: "Success", 
-        description: "Data model created with Flow, Conceptual, Logical, and Physical layers. Switched to new model.",
+        description: description,
       });
+      
       const defaultSystem = systems[0];
       const defaultDomain = domains[0];
       const defaultArea = defaultDomain
@@ -183,6 +241,11 @@ export default function AddDataModelModal({
         domainId: defaultDomain ? String(defaultDomain.id) : "",
         dataAreaId: defaultArea ? String(defaultArea.id) : "",
       });
+      
+      // Reset selected objects
+      setSelectedObjectIds([]);
+      setSelectAll(true);
+      
       onOpenChange(false);
     },
     onError: (error) => {
@@ -202,7 +265,7 @@ export default function AddDataModelModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create New Data Model</DialogTitle>
           <DialogDescription>
@@ -330,6 +393,97 @@ export default function AddDataModelModal({
                 </FormItem>
               )}
             />
+
+            {/* Data Objects Selection Section */}
+            {filteredDataObjects.length > 0 && (
+              <div className="space-y-3 rounded-lg border p-4 bg-slate-50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <FormLabel className="text-base">Data Objects</FormLabel>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Select objects to include in this model (all selected by default)
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="select-all"
+                      checked={selectAll && selectedObjectIds.length === filteredDataObjects.length}
+                      onCheckedChange={(checked) => {
+                        setSelectAll(!!checked);
+                        if (checked) {
+                          setSelectedObjectIds(filteredDataObjects.map(obj => obj.id));
+                        } else {
+                          setSelectedObjectIds([]);
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="select-all"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      Select All
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Badge variant="secondary">
+                    {selectedObjectIds.length} of {filteredDataObjects.length} selected
+                  </Badge>
+                </div>
+
+                <ScrollArea className="h-48 w-full rounded-md border bg-white p-3">
+                  <div className="space-y-2">
+                    {filteredDataObjects.map((obj) => {
+                      const isSelected = selectedObjectIds.includes(obj.id);
+                      return (
+                        <div
+                          key={obj.id}
+                          className="flex items-start space-x-3 rounded-md p-2 hover:bg-slate-100 transition-colors"
+                        >
+                          <Checkbox
+                            id={`object-${obj.id}`}
+                            checked={isSelected}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedObjectIds([...selectedObjectIds, obj.id]);
+                              } else {
+                                setSelectedObjectIds(selectedObjectIds.filter(id => id !== obj.id));
+                                setSelectAll(false);
+                              }
+                            }}
+                          />
+                          <div className="flex-1">
+                            <label
+                              htmlFor={`object-${obj.id}`}
+                              className="text-sm font-medium leading-none cursor-pointer"
+                            >
+                              {obj.name}
+                            </label>
+                            {obj.description && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {obj.description}
+                              </p>
+                            )}
+                            {obj.objectType && (
+                              <Badge variant="outline" className="text-xs mt-1">
+                                {obj.objectType}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+
+            {selectedDomainId && filteredDataObjects.length === 0 && !objectsLoading && (
+              <div className="text-sm text-muted-foreground italic p-3 bg-slate-50 rounded-md">
+                No data objects found for the selected domain, area, and system combination.
+              </div>
+            )}
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button

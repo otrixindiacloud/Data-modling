@@ -1,5 +1,14 @@
 import type { Storage } from "../storage";
-import type { DataModelLayer, InsertDataModelLayer } from "@shared/schema";
+import type { 
+  DataModelLayer, 
+  InsertDataModelLayer, 
+  InsertDataModelObject,
+  InsertDataModelObjectAttribute,
+  InsertDataModelObjectRelationship,
+  DataObject,
+  Attribute,
+  DataObjectRelationship
+} from "@shared/schema";
 import { getTargetSystemTemplate } from "../services/targetSystemTemplates";
 import { parseOptionalNumber, resolveDomainAndArea, getSystemIdByName } from "./route_helpers";
 
@@ -9,6 +18,7 @@ export interface CreateModelWithLayersInput {
   targetSystemId?: number | string;
   domainId?: number | string;
   dataAreaId?: number | string;
+  selectedObjectIds?: number[]; // Array of data object IDs to include
 }
 
 export interface CreateModelWithLayersResult {
@@ -17,18 +27,19 @@ export interface CreateModelWithLayersResult {
   logical: DataModelLayer;
   physical: DataModelLayer;
   templatesAdded: number;
+  objectsAdded: number;
   message: string;
 }
 
 /**
  * Create a model with all 4 layers (Flow, Conceptual, Logical, Physical)
- * and optionally populate with template objects
+ * and optionally populate with template objects or selected data objects
  */
 export async function createModelWithLayers(
   input: CreateModelWithLayersInput,
   storage: Storage
 ): Promise<CreateModelWithLayersResult> {
-  const { name, targetSystem, targetSystemId, domainId, dataAreaId } = input;
+  const { name, targetSystem, targetSystemId, domainId, dataAreaId, selectedObjectIds } = input;
 
   if (!name) {
     throw new Error("Model name is required");
@@ -93,26 +104,48 @@ export async function createModelWithLayers(
     dataAreaId: resolvedDataAreaId,
   });
 
-  // Get template and populate objects if available
   let templatesAdded = 0;
-  const template = getTargetSystemTemplate(selectedTargetSystem);
-  
-  if (template) {
-    console.log(`Adding template objects for ${selectedTargetSystem}...`);
+  let objectsAdded = 0;
+  let template = null;
+
+  // Populate with selected data objects if provided
+  if (selectedObjectIds && selectedObjectIds.length > 0) {
+    console.log(`[MODEL_HANDLERS] Populating model with ${selectedObjectIds.length} selected data objects...`);
+    console.log('[MODEL_HANDLERS] Selected object IDs:', selectedObjectIds);
     
-    templatesAdded = await populateModelsFromTemplate(
+    objectsAdded = await populateModelsWithSelectedObjects(
       {
         conceptualModel,
         logicalModel,
         physicalModel,
       },
-      template,
-      selectedTargetSystem,
-      resolvedTargetSystemId,
+      selectedObjectIds,
       storage
     );
     
-    console.log(`Successfully added ${templatesAdded} template objects to all layers`);
+    console.log(`[MODEL_HANDLERS] Successfully added ${objectsAdded} objects with their attributes and relationships to all layers`);
+  } else {
+    console.log('[MODEL_HANDLERS] No selectedObjectIds provided, using template-based population');
+    // Get template and populate objects if available (original behavior)
+    template = getTargetSystemTemplate(selectedTargetSystem);
+    
+    if (template) {
+      console.log(`Adding template objects for ${selectedTargetSystem}...`);
+      
+      templatesAdded = await populateModelsFromTemplate(
+        {
+          conceptualModel,
+          logicalModel,
+          physicalModel,
+        },
+        template,
+        selectedTargetSystem,
+        resolvedTargetSystemId,
+        storage
+      );
+      
+      console.log(`Successfully added ${templatesAdded} template objects to all layers`);
+    }
   }
 
   return {
@@ -121,8 +154,13 @@ export async function createModelWithLayers(
     logical: logicalModel,
     physical: physicalModel,
     templatesAdded,
+    objectsAdded,
     message: `Model created with all 4 layers${
-      template ? ` and ${templatesAdded} template objects from ${selectedTargetSystem}` : ""
+      objectsAdded > 0 
+        ? ` and ${objectsAdded} selected objects with their attributes and relationships` 
+        : template 
+          ? ` and ${templatesAdded} template objects from ${selectedTargetSystem}` 
+          : ""
     }`,
   };
 }
@@ -209,11 +247,9 @@ async function populateModelsFromTemplate(
     // Create object in conceptual layer
     const conceptualObject = await storage.createDataObject({
       name: templateObj.name,
-      modelId: conceptualModel.id,
       domainId: domainId,
       dataAreaId: areaId,
-      sourceSystemId: await getSystemIdByName(storage, templateObj.sourceSystem),
-      targetSystemId: resolvedTargetSystemId,
+      systemId: await getSystemIdByName(storage, templateObj.sourceSystem),
       isNew: false,
       position: basePosition,
     });
@@ -234,11 +270,9 @@ async function populateModelsFromTemplate(
     // Create object in logical layer
     const logicalObject = await storage.createDataObject({
       name: templateObj.name,
-      modelId: logicalModel.id,
       domainId: domainId,
       dataAreaId: areaId,
-      sourceSystemId: await getSystemIdByName(storage, templateObj.sourceSystem),
-      targetSystemId: resolvedTargetSystemId,
+      systemId: await getSystemIdByName(storage, templateObj.sourceSystem),
       isNew: false,
       position: basePosition,
     });
@@ -259,11 +293,9 @@ async function populateModelsFromTemplate(
     // Create object in physical layer
     const physicalObject = await storage.createDataObject({
       name: templateObj.name,
-      modelId: physicalModel.id,
       domainId: domainId,
       dataAreaId: areaId,
-      sourceSystemId: await getSystemIdByName(storage, templateObj.sourceSystem),
-      targetSystemId: resolvedTargetSystemId,
+      systemId: await getSystemIdByName(storage, templateObj.sourceSystem),
       isNew: false,
       position: basePosition,
     });
@@ -319,4 +351,267 @@ async function populateModelsFromTemplate(
   }
 
   return objectsCreated;
+}
+
+/**
+ * Populate models with selected data objects, their attributes, and relationships
+ */
+async function populateModelsWithSelectedObjects(
+  models: {
+    conceptualModel: DataModelLayer;
+    logicalModel: DataModelLayer;
+    physicalModel: DataModelLayer;
+  },
+  selectedObjectIds: number[],
+  storage: Storage
+): Promise<number> {
+  const { conceptualModel, logicalModel, physicalModel } = models;
+  
+  console.log('[POPULATE_OBJECTS] Starting optimized batch population...');
+  console.log('[POPULATE_OBJECTS] Models:', {
+    conceptual: conceptualModel.id,
+    logical: logicalModel.id,
+    physical: physicalModel.id
+  });
+  console.log('[POPULATE_OBJECTS] Object IDs to populate:', selectedObjectIds);
+  
+  let objectsAdded = 0;
+  
+  // Batch fetch all data objects at once
+  console.log('[POPULATE_OBJECTS] Batch fetching all data objects...');
+  const dataObjectsPromises = selectedObjectIds.map(id => storage.getDataObject(id));
+  const dataObjectsResults = await Promise.all(dataObjectsPromises);
+  const dataObjects = dataObjectsResults.filter((obj): obj is NonNullable<typeof obj> => obj !== null && obj !== undefined);
+  
+  if (dataObjects.length === 0) {
+    console.warn('[POPULATE_OBJECTS] No valid data objects found');
+    return 0;
+  }
+  
+  console.log(`[POPULATE_OBJECTS] Found ${dataObjects.length} valid data objects`);
+  
+  // Batch fetch all attributes for all objects at once
+  console.log('[POPULATE_OBJECTS] Batch fetching attributes for all objects...');
+  const attributesPromises = dataObjects.map(obj => storage.getAttributesByObject(obj.id));
+  const attributesResults = await Promise.all(attributesPromises);
+  const attributesByObjectId = new Map<number, typeof attributesResults[0]>();
+  dataObjects.forEach((obj, idx) => {
+    attributesByObjectId.set(obj.id, attributesResults[idx]);
+  });
+  
+  // Prepare batch inserts for model objects
+  const conceptualModelObjects: InsertDataModelObject[] = [];
+  const logicalModelObjects: InsertDataModelObject[] = [];
+  const physicalModelObjects: InsertDataModelObject[] = [];
+  
+  for (const dataObject of dataObjects) {
+    const baseModelObject = {
+      objectId: dataObject.id,
+      name: dataObject.name,
+      description: dataObject.description,
+      objectType: dataObject.objectType,
+      domainId: dataObject.domainId,
+      dataAreaId: dataObject.dataAreaId,
+      targetSystemId: null as number | null,
+      position: null,
+      metadata: dataObject.metadata || {},
+      isVisible: true,
+      layerSpecificConfig: {},
+    };
+    
+    conceptualModelObjects.push({
+      ...baseModelObject,
+      modelId: conceptualModel.id,
+      targetSystemId: conceptualModel.targetSystemId,
+    });
+    
+    logicalModelObjects.push({
+      ...baseModelObject,
+      modelId: logicalModel.id,
+      targetSystemId: logicalModel.targetSystemId,
+    });
+    
+    physicalModelObjects.push({
+      ...baseModelObject,
+      modelId: physicalModel.id,
+      targetSystemId: physicalModel.targetSystemId,
+    });
+  }
+  
+  // Batch create all model objects (3 parallel batches, one per layer)
+  console.log('[POPULATE_OBJECTS] Batch creating model objects across all layers...');
+  const [createdConceptual, createdLogical, createdPhysical] = await Promise.all([
+    storage.createDataModelObjectsBatch(conceptualModelObjects),
+    storage.createDataModelObjectsBatch(logicalModelObjects),
+    storage.createDataModelObjectsBatch(physicalModelObjects),
+  ]);
+  
+  console.log(`[POPULATE_OBJECTS] Created ${createdConceptual.length} conceptual, ${createdLogical.length} logical, ${createdPhysical.length} physical objects`);
+  
+  // Build maps for quick lookup
+  const conceptualObjectMap = new Map<number, number>(); // dataObjectId -> modelObjectId
+  const logicalObjectMap = new Map<number, number>();
+  const physicalObjectMap = new Map<number, number>();
+  
+  createdConceptual.forEach((obj, idx) => {
+    conceptualObjectMap.set(dataObjects[idx].id, obj.id);
+  });
+  createdLogical.forEach((obj, idx) => {
+    logicalObjectMap.set(dataObjects[idx].id, obj.id);
+  });
+  createdPhysical.forEach((obj, idx) => {
+    physicalObjectMap.set(dataObjects[idx].id, obj.id);
+  });
+  
+  // Prepare batch inserts for attributes
+  const conceptualAttributes: InsertDataModelObjectAttribute[] = [];
+  const logicalAttributes: InsertDataModelObjectAttribute[] = [];
+  const physicalAttributes: InsertDataModelObjectAttribute[] = [];
+  
+  for (let i = 0; i < dataObjects.length; i++) {
+    const dataObject = dataObjects[i];
+    const attributes = attributesByObjectId.get(dataObject.id) || [];
+    const conceptualModelObjectId = createdConceptual[i].id;
+    const logicalModelObjectId = createdLogical[i].id;
+    const physicalModelObjectId = createdPhysical[i].id;
+    
+    for (const attr of attributes) {
+      const baseAttr = {
+        attributeId: attr.id,
+        name: attr.name,
+        description: attr.description,
+        conceptualType: attr.conceptualType,
+        logicalType: attr.logicalType,
+        physicalType: attr.physicalType,
+        dataType: attr.dataType,
+        length: attr.length,
+        precision: attr.precision,
+        scale: attr.scale,
+        nullable: attr.nullable,
+        isPrimaryKey: attr.isPrimaryKey,
+        isForeignKey: attr.isForeignKey,
+        orderIndex: attr.orderIndex,
+      };
+      
+      conceptualAttributes.push({
+        ...baseAttr,
+        modelObjectId: conceptualModelObjectId,
+        modelId: conceptualModel.dataModelId,
+      });
+      
+      logicalAttributes.push({
+        ...baseAttr,
+        modelObjectId: logicalModelObjectId,
+        modelId: logicalModel.dataModelId,
+      });
+      
+      physicalAttributes.push({
+        ...baseAttr,
+        modelObjectId: physicalModelObjectId,
+        modelId: physicalModel.dataModelId,
+      });
+    }
+  }
+  
+  // Batch create all attributes (3 parallel batches, one per layer)
+  console.log('[POPULATE_OBJECTS] Batch creating attributes across all layers...');
+  await Promise.all([
+    storage.createDataModelObjectAttributesBatch(conceptualAttributes),
+    storage.createDataModelObjectAttributesBatch(logicalAttributes),
+    storage.createDataModelObjectAttributesBatch(physicalAttributes),
+  ]);
+  
+  console.log(`[POPULATE_OBJECTS] Created ${conceptualAttributes.length} attributes per layer`);
+  
+  objectsAdded = dataObjects.length;
+  
+  // Batch fetch all relationships at once
+  console.log('[POPULATE_OBJECTS] Batch fetching relationships for all objects...');
+  const relationshipsPromises = selectedObjectIds.map(id => 
+    storage.getDataObjectRelationshipsByObject(id)
+  );
+  const relationshipsResults = await Promise.all(relationshipsPromises);
+  const allRelationships = relationshipsResults.flat();
+  
+  // Filter relationships to only those between selected objects
+  const validRelationships = allRelationships.filter(rel =>
+    selectedObjectIds.includes(rel.sourceDataObjectId) &&
+    selectedObjectIds.includes(rel.targetDataObjectId)
+  );
+  
+  // Remove duplicates (since we fetched by source object, we might have duplicates)
+  const uniqueRelationships = Array.from(
+    new Map(validRelationships.map(rel => [
+      `${rel.sourceDataObjectId}-${rel.targetDataObjectId}-${rel.type}`,
+      rel
+    ])).values()
+  );
+  
+  console.log(`[POPULATE_OBJECTS] Found ${uniqueRelationships.length} valid relationships to create`);
+  
+  // Prepare batch inserts for relationships
+  const conceptualRelationships: InsertDataModelObjectRelationship[] = [];
+  const logicalRelationships: InsertDataModelObjectRelationship[] = [];
+  const physicalRelationships: InsertDataModelObjectRelationship[] = [];
+  
+  for (const rel of uniqueRelationships) {
+    const conceptualSourceId = conceptualObjectMap.get(rel.sourceDataObjectId);
+    const conceptualTargetId = conceptualObjectMap.get(rel.targetDataObjectId);
+    const logicalSourceId = logicalObjectMap.get(rel.sourceDataObjectId);
+    const logicalTargetId = logicalObjectMap.get(rel.targetDataObjectId);
+    const physicalSourceId = physicalObjectMap.get(rel.sourceDataObjectId);
+    const physicalTargetId = physicalObjectMap.get(rel.targetDataObjectId);
+    
+    const baseRelationship = {
+      type: rel.type,
+      relationshipLevel: rel.relationshipLevel,
+      sourceAttributeId: rel.sourceAttributeId,
+      targetAttributeId: rel.targetAttributeId,
+      name: rel.name,
+      description: rel.description,
+    };
+    
+    if (conceptualSourceId && conceptualTargetId) {
+      conceptualRelationships.push({
+        ...baseRelationship,
+        sourceModelObjectId: conceptualSourceId,
+        targetModelObjectId: conceptualTargetId,
+        modelId: conceptualModel.dataModelId,
+        layer: 'conceptual',
+      });
+    }
+    
+    if (logicalSourceId && logicalTargetId) {
+      logicalRelationships.push({
+        ...baseRelationship,
+        sourceModelObjectId: logicalSourceId,
+        targetModelObjectId: logicalTargetId,
+        modelId: logicalModel.dataModelId,
+        layer: 'logical',
+      });
+    }
+    
+    if (physicalSourceId && physicalTargetId) {
+      physicalRelationships.push({
+        ...baseRelationship,
+        sourceModelObjectId: physicalSourceId,
+        targetModelObjectId: physicalTargetId,
+        modelId: physicalModel.dataModelId,
+        layer: 'physical',
+      });
+    }
+  }
+  
+  // Batch create all relationships (3 parallel batches, one per layer)
+  console.log('[POPULATE_OBJECTS] Batch creating relationships across all layers...');
+  await Promise.all([
+    storage.createDataModelObjectRelationshipsBatch(conceptualRelationships),
+    storage.createDataModelObjectRelationshipsBatch(logicalRelationships),
+    storage.createDataModelObjectRelationshipsBatch(physicalRelationships),
+  ]);
+  
+  console.log(`[POPULATE_OBJECTS] Created ${conceptualRelationships.length} relationships per layer`);
+  console.log('[POPULATE_OBJECTS] Batch population completed successfully!');
+  
+  return objectsAdded;
 }
