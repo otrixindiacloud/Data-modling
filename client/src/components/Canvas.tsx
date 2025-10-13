@@ -18,6 +18,7 @@ import ReactFlow, {
   EdgeChange,
 } from "reactflow";
 import "reactflow/dist/style.css";
+
 import { MousePointer, Move, Link, GitBranch, Save, AlertCircle, CheckCircle, Plus, Trash2 } from "lucide-react";
 import { useTouchPerformance, useDeviceCapabilities } from '@/hooks/useTouch';
 import { Button } from "@/components/ui/button";
@@ -44,8 +45,9 @@ import LayerNavigator from "./LayerNavigator";
 
 import SearchFilterPanel from "./Canvas/SearchFilterPanel";
 import AutoLayoutManager from "./Canvas/AutoLayoutManager";
+import LoadingOverlay from "./LoadingOverlay";
 import { updateDynamicColors } from "@/utils/colorUtils";
-import type { ModelLayer } from "@/types/modeler";
+import type { ModelLayer, CanvasNode } from "@/types/modeler";
 
 const isManyToManyRelationship = (type?: string | null): boolean =>
   type === "N:M" || type === "M:N";
@@ -108,12 +110,19 @@ function CanvasComponent() {
     history,
     undo,
     redo,
-    clearHistory
+    clearHistory,
+    copyNodes,
+    getCopiedNodes,
+    clearCopiedNodes
   } = useModelerStore();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const nodesRef = useRef<Node[]>([]);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showMiniMap, setShowMiniMap] = useState(true);
@@ -125,7 +134,12 @@ function CanvasComponent() {
   useEffect(() => {
     console.log("Connection mode changed to:", connectionMode);
   }, [connectionMode]);
-  const [pendingConnection, setPendingConnection] = useState<{ source: string; target: string } | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  } | null>(null);
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
   const [relationshipType, setRelationshipType] = useState<'1:1' | '1:N' | 'N:M'>('1:N');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -214,15 +228,11 @@ function CanvasComponent() {
     layer: ModelLayer;
   };
 
-  // Mutation for saving node positions with enhanced error handling
+  const pendingSavePayloadRef = useRef<SavePositionsPayload | null>(null);
+  const isSavePendingRef = useRef(false);
+
   const savePositionsMutation = useMutation({
     mutationFn: async ({ positions, modelId, layer }: SavePositionsPayload) => {
-      console.log('🚀 ========== MUTATION FUNCTION CALLED ==========');
-      console.log('🚀 Positions:', positions);
-      console.log('🚀 Model ID:', modelId);
-      console.log('🚀 Layer:', layer);
-      console.log('🚀 Time:', new Date().toLocaleTimeString());
-
       const response = await fetch(`/api/models/${modelId}/canvas/positions`, {
         method: 'POST',
         headers: {
@@ -234,48 +244,82 @@ function CanvasComponent() {
         }),
       });
 
-      console.log('📡 ========== SERVER RESPONSE RECEIVED ==========');
-      console.log('📡 Status:', response.status);
-      console.log('📡 OK:', response.ok);
-      console.log('📡 Time:', new Date().toLocaleTimeString());
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ ========== SAVE FAILED ==========');
-        console.error('❌ Error:', errorText);
         throw new Error(`Failed to save positions: ${response.status} ${errorText}`);
       }
 
       const result = await response.json();
-      console.log('✅ ========== SAVE SUCCESSFUL ==========');
-      console.log('✅ Result:', result);
       return result;
     },
     onSuccess: (_, variables) => {
-      console.log('✨ ========== ON SUCCESS CALLBACK ==========');
-      console.log('✨ Setting status to "saved"');
-      console.log('✨ Time:', new Date().toLocaleTimeString());
       setSaveStatus('saved');
-      // Clear saved status after 2 seconds
-      setTimeout(() => {
-        console.log('🔄 Resetting save status to idle');
-        setSaveStatus('idle');
-      }, 2000);
 
-      // Invalidate and refetch canvas data to ensure consistency
-      queryClient.invalidateQueries({
-        queryKey: ["/api/models", variables.modelId, "canvas", variables.layer]
+      queryClient.setQueryData([
+        "/api/models",
+        variables.modelId,
+        "canvas",
+        variables.layer
+      ], (existing: any) => {
+        if (!existing || !Array.isArray(existing.nodes)) {
+          return existing;
+        }
+
+        const updatedNodes = existing.nodes.map((node: any) => {
+          const match = variables.positions.find((pos) => {
+            const matchesModelObject = pos.modelObjectId != null && node?.data?.modelObjectId === pos.modelObjectId;
+            const matchesObject = pos.objectId != null && node?.data?.objectId === pos.objectId;
+            return matchesModelObject || matchesObject;
+          });
+
+          if (!match) {
+            return node;
+          }
+
+          return {
+            ...node,
+            position: match.position,
+          };
+        });
+
+        return {
+          ...existing,
+          nodes: updatedNodes,
+        };
       });
+
+      const queuedPayload = pendingSavePayloadRef.current;
+      if (queuedPayload) {
+        pendingSavePayloadRef.current = null;
+        setTimeout(() => {
+          setSaveStatus('saving');
+          mutatePositions(queuedPayload);
+        }, 0);
+      } else {
+        setTimeout(() => {
+          if (!pendingSavePayloadRef.current && !isSavePendingRef.current) {
+            setSaveStatus('idle');
+          }
+        }, 2000);
+      }
     },
     onError: (error) => {
-      console.error('💥 ========== ON ERROR CALLBACK ==========');
-      console.error('💥 Error:', error);
-      console.error('💥 Time:', new Date().toLocaleTimeString());
+      console.error('Failed to save canvas positions:', error);
       setSaveStatus('error');
-      // Clear error status after 5 seconds
-      setTimeout(() => setSaveStatus('idle'), 5000);
+      // Clear error status after 5 seconds if nothing else is queued
+      setTimeout(() => {
+        if (!pendingSavePayloadRef.current && !isSavePendingRef.current) {
+          setSaveStatus('idle');
+        }
+      }, 5000);
     }
   });
+
+  useEffect(() => {
+    isSavePendingRef.current = savePositionsMutation.isPending;
+  }, [savePositionsMutation.isPending]);
+
+  const mutatePositions = savePositionsMutation.mutate;
 
   // Mutation for saving relationships to database with enhanced error handling
   const saveRelationshipMutation = useMutation({
@@ -387,6 +431,7 @@ function CanvasComponent() {
 
   // Track loading state
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const wasLayerLoadingRef = useRef(false);
 
   // Update dynamic colors when systems, domains, or areas change
   useEffect(() => {
@@ -396,6 +441,29 @@ function CanvasComponent() {
       setNodes(prevNodes => [...prevNodes]);
     }
   }, [systems, domains, areas, setNodes]);
+
+  // Broadcast layer loading progress so parent components can show status indicators
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const currentlyLoading = isLoading || isDataLoading;
+
+    if (currentlyLoading) {
+      if (!wasLayerLoadingRef.current) {
+        window.dispatchEvent(new CustomEvent("layerSwitchLoading", {
+          detail: { layer: currentLayer }
+        }));
+      }
+      wasLayerLoadingRef.current = true;
+    } else if (wasLayerLoadingRef.current) {
+      wasLayerLoadingRef.current = false;
+      window.dispatchEvent(new CustomEvent("layerSwitchComplete", {
+        detail: { layer: currentLayer }
+      }));
+    }
+  }, [isLoading, isDataLoading, currentLayer]);
 
   // Update local state when canvas data loads and manage history properly
   useEffect(() => {
@@ -422,6 +490,16 @@ function CanvasComponent() {
             isNew: node.data?.isNew
           }
         });
+        
+        // DEBUG: Log attribute details to verify attributeId is present
+        if (node.data?.attributes && node.data.attributes.length > 0) {
+          console.log(`🔍 Node ${node.data.name} attributes:`, node.data.attributes.map((attr: any) => ({
+            id: attr.id,
+            attributeId: attr.attributeId,
+            name: attr.name,
+            handleId: `attr-${attr.attributeId || attr.id}`
+          })));
+        }
       });
       
       setIsDataLoading(true);
@@ -445,6 +523,19 @@ function CanvasComponent() {
           const derivedTargetHandle = isAttributeRelationship && edgeData.targetAttributeId
             ? `attr-${edgeData.targetAttributeId}-target`
             : undefined;
+
+          // DEBUG: Log edge handle IDs
+          console.log(`🔗 Processing edge ${edge.id}:`, {
+            sourceNode: edge.source,
+            targetNode: edge.target,
+            isAttributeRelationship,
+            sourceAttributeId: edgeData.sourceAttributeId,
+            targetAttributeId: edgeData.targetAttributeId,
+            derivedSourceHandle,
+            derivedTargetHandle,
+            finalSourceHandle: isAttributeRelationship ? edge.sourceHandle ?? derivedSourceHandle : edge.sourceHandle,
+            finalTargetHandle: isAttributeRelationship ? edge.targetHandle ?? derivedTargetHandle : edge.targetHandle
+          });
 
           return {
             ...edge,
@@ -887,6 +978,134 @@ function CanvasComponent() {
     window.dispatchEvent(new CustomEvent('openAddObjectModalConfirmed'));
   }, [currentLayer, toast]);
 
+  // Handle paste nodes from clipboard
+  const handlePasteNodes = useCallback(async (copiedNodes: CanvasNode[]) => {
+    if (!requireModelBeforeAction("Select a data model before pasting objects.")) {
+      return;
+    }
+
+    const targetModelId = currentLayerModel?.id || currentModel?.id;
+    if (!targetModelId) {
+      toast({
+        title: "No Model Selected",
+        description: "Please select a data model before pasting objects.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Get viewport center for paste position
+    const viewport = getViewport();
+    const centerX = (window.innerWidth / 2 - viewport.x) / viewport.zoom;
+    const centerY = (window.innerHeight / 2 - viewport.y) / viewport.zoom;
+
+    // Calculate offset to paste nodes centered on viewport
+    const bounds = copiedNodes.reduce((acc, node) => {
+      return {
+        minX: Math.min(acc.minX, node.position.x),
+        minY: Math.min(acc.minY, node.position.y),
+        maxX: Math.max(acc.maxX, node.position.x),
+        maxY: Math.max(acc.maxY, node.position.y),
+      };
+    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+
+    const centerOffsetX = centerX - (bounds.minX + bounds.maxX) / 2;
+    const centerOffsetY = centerY - (bounds.minY + bounds.maxY) / 2;
+
+    // Create new nodes with new IDs and offset positions
+    const newNodes = copiedNodes.map((node, index) => ({
+      ...node,
+      id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${index}`,
+      position: {
+        x: node.position.x + centerOffsetX + (index * 10), // Small offset for each node
+        y: node.position.y + centerOffsetY + (index * 10),
+      },
+      selected: false,
+      data: {
+        ...node.data,
+        // Remove modelObjectId so new entries will be created
+        modelObjectId: undefined,
+      }
+    }));
+
+    // Add nodes to canvas immediately
+    setNodes((nds) => [...nds, ...newNodes]);
+
+    // Save pasted nodes to the database
+    try {
+      const savePromises = newNodes.map(async (node) => {
+        const position = {
+          x: Math.round(node.position.x * 100) / 100,
+          y: Math.round(node.position.y * 100) / 100
+        };
+
+        const response = await fetch(`/api/models/${targetModelId}/canvas/add-object`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            objectId: node.data.objectId,
+            layerSpecificConfig: {
+              position: position,
+              layer: currentLayer
+            }
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to save node ${node.data.name}`);
+        }
+
+        const result = await response.json();
+        return { nodeId: node.id, modelObjectId: result.modelObjectId };
+      });
+
+      const results = await Promise.all(savePromises);
+
+      // Update nodes with modelObjectIds from server
+      setNodes((nds) =>
+        nds.map((node) => {
+          const result = results.find((r) => r.nodeId === node.id);
+          if (result) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                modelObjectId: result.modelObjectId,
+              }
+            };
+          }
+          return node;
+        })
+      );
+
+      // Save to history
+      saveToHistory('node_added', `Pasted ${newNodes.length} node${newNodes.length > 1 ? 's' : ''}`,
+        `Pasted ${newNodes.length} object${newNodes.length > 1 ? 's' : ''} to ${currentLayer} layer`);
+
+      // Invalidate canvas query to refresh data
+      queryClient.invalidateQueries({
+        queryKey: ["/api/models", targetModelId, "canvas", currentLayer]
+      });
+
+      toast({
+        title: "✓ Nodes Pasted Successfully",
+        description: `${newNodes.length} node${newNodes.length > 1 ? 's' : ''} pasted to ${currentLayer} layer`,
+      });
+    } catch (error) {
+      console.error('Failed to paste nodes:', error);
+      // Remove nodes that failed to save
+      const nodeIds = newNodes.map(n => n.id);
+      setNodes((nds) => nds.filter(n => !nodeIds.includes(n.id)));
+      toast({
+        title: "Failed to Paste Nodes",
+        description: "Could not save pasted nodes to the database.",
+        variant: "destructive"
+      });
+    }
+  }, [currentModel, currentLayerModel, currentLayer, getViewport, setNodes, saveToHistory, queryClient, toast, requireModelBeforeAction]);
+
   // Handle gesture events
   useEffect(() => {
     const handleOpenAddObjectModal = () => {
@@ -903,153 +1122,79 @@ function CanvasComponent() {
   // Enhanced onNodesChange handler with robust position saving
   const savePositionsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const queuePositionSave = useCallback((reason: string, debugInfo?: Record<string, unknown>) => {
+  const queuePositionSave = useCallback((_reason?: string) => {
     const modelId = currentLayerModel?.id || currentModel?.id;
-    console.log('🗂️ queuePositionSave invoked', {
-      reason,
-      debugInfo,
-      modelId,
-      currentLayer,
-      hasPendingMutation: savePositionsMutation.isPending
-    });
-
     if (!modelId) {
-      console.warn('🚫 queuePositionSave aborted - no model id available', { reason, currentLayer });
       return;
     }
 
-    // Clear any existing timeout to debounce rapid updates
     if (savePositionsTimeoutRef.current) {
-      console.log('⏱️ queuePositionSave clearing existing timeout', { reason });
       clearTimeout(savePositionsTimeoutRef.current);
     }
 
     savePositionsTimeoutRef.current = setTimeout(() => {
-      console.log('⏰ queuePositionSave timeout fired', {
-        reason,
-        time: new Date().toLocaleTimeString(),
-        modelId,
-        layer: currentLayer
+      savePositionsTimeoutRef.current = null;
+      const currentNodes = nodesRef.current;
+
+      const validNodes = currentNodes.filter((node) => {
+        const data = node.data || {};
+        const hasId = (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) ||
+          (typeof data.objectId === 'number' && data.objectId > 0);
+
+        return (
+          hasId &&
+          node.position &&
+          typeof node.position.x === 'number' &&
+          typeof node.position.y === 'number' &&
+          !Number.isNaN(node.position.x) &&
+          !Number.isNaN(node.position.y)
+        );
       });
 
-      if (savePositionsMutation.isPending) {
-        console.log('⏸️ queuePositionSave detected pending mutation, skipping', { reason });
+      if (validNodes.length === 0) {
+        setSaveStatus('idle');
+        return;
+      }
+
+      const positions = validNodes.map((node) => {
+        const data = node.data || {};
+        const payload: {
+          modelObjectId?: number;
+          objectId?: number;
+          position: { x: number; y: number };
+        } = {
+          position: {
+            x: Math.round(node.position.x * 100) / 100,
+            y: Math.round(node.position.y * 100) / 100,
+          },
+        };
+
+        if (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) {
+          payload.modelObjectId = data.modelObjectId;
+        }
+
+        if (typeof data.objectId === 'number' && data.objectId > 0) {
+          payload.objectId = data.objectId;
+        }
+
+        return payload;
+      });
+
+      const payload: SavePositionsPayload = {
+        positions,
+        modelId,
+        layer: currentLayer,
+      };
+
+      if (isSavePendingRef.current) {
+        pendingSavePayloadRef.current = payload;
         return;
       }
 
       setSaveStatus('saving');
-
-      setNodes(currentNodes => {
-        console.log('📦 queuePositionSave evaluating nodes', { reason, nodeCount: currentNodes.length });
-
-        const validNodes = currentNodes.filter(node => {
-          const data = node.data || {};
-          const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
-          const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
-          const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
-
-          const isValid = (
-            hasIdentifier &&
-            node.position &&
-            typeof node.position.x === 'number' &&
-            typeof node.position.y === 'number' &&
-            !isNaN(node.position.x) &&
-            !isNaN(node.position.y)
-          );
-
-          if (!isValid && node.id) {
-            console.warn('⚠️ queuePositionSave filtered invalid node', {
-              reason,
-              id: node.id,
-              name: node.data?.name,
-              hasIdentifier,
-              modelObjectId,
-              objectId,
-              position: node.position
-            });
-          }
-
-          return isValid;
-        });
-
-        console.log('✅ queuePositionSave valid nodes', { reason, validCount: validNodes.length });
-
-        if (validNodes.length === 0) {
-          console.warn('❌ queuePositionSave found no valid nodes to save', { reason });
-          setSaveStatus('idle');
-          return currentNodes;
-        }
-
-        const positions = validNodes.map(node => {
-          const data = node.data || {};
-          const payload: {
-            modelObjectId?: number;
-            objectId?: number;
-            position: { x: number; y: number };
-          } = {
-            position: {
-              x: Math.round(node.position.x * 100) / 100,
-              y: Math.round(node.position.y * 100) / 100,
-            }
-          };
-
-          if (typeof data.modelObjectId === 'number' && data.modelObjectId > 0) {
-            payload.modelObjectId = data.modelObjectId;
-          }
-
-          if (typeof data.objectId === 'number' && data.objectId > 0) {
-            payload.objectId = data.objectId;
-          }
-
-          console.log('📍 queuePositionSave payload entry', {
-            reason,
-            nodeId: node.id,
-            nodeName: node.data?.name,
-            payload
-          });
-
-          return payload;
-        });
-
-        const targetModelId = currentLayerModel?.id || currentModel?.id;
-
-        console.log('🎯 queuePositionSave final payload', {
-          reason,
-          positionsCount: positions.length,
-          targetModelId,
-          layer: currentLayer,
-          isPending: savePositionsMutation.isPending
-        });
-
-        if (positions.length > 0 && targetModelId && !savePositionsMutation.isPending) {
-          console.log('✅ queuePositionSave dispatching mutation', {
-            reason,
-            targetModelId,
-            positionsCount: positions.length
-          });
-
-          savePositionsMutation.mutate({
-            positions,
-            modelId: targetModelId,
-            layer: currentLayer,
-          });
-        } else if (savePositionsMutation.isPending) {
-          console.log('⏸️ queuePositionSave detected concurrent mutation, resetting status', { reason });
-          setSaveStatus('idle');
-        } else {
-          console.error('❌ queuePositionSave missing requirements', {
-            reason,
-            positionsCount: positions.length,
-            targetModelId,
-            layer: currentLayer
-          });
-          setSaveStatus('idle');
-        }
-
-        return currentNodes;
-      });
+      mutatePositions(payload);
     }, 300);
-  }, [currentLayer, currentLayerModel?.id, currentModel?.id, savePositionsMutation, setNodes, setSaveStatus]);
+  }, [currentLayer, currentLayerModel?.id, currentModel?.id, mutatePositions]);
   
   // Listen for manual save requests from properties panel
   useEffect(() => {
@@ -1065,20 +1210,8 @@ function CanvasComponent() {
   }, [queuePositionSave]);
   
   const handleNodesChange = useCallback((changes: any[]) => {
-    console.log('🚨 handleNodesChange CALLED - TOP OF FUNCTION');
-    console.log('   Changes:', changes.length, 'Total');
-    console.log('   First change:', changes[0] ? { type: changes[0].type, id: changes[0].id, dragging: changes[0].dragging } : 'none');
-    
     // Apply changes to local state first
     onNodesChange(changes);
-    
-    // DEBUG: Log all changes
-    console.log('🔄 handleNodesChange called:', {
-      changesCount: changes.length,
-      changes: changes.map(c => ({ type: c.type, id: c.id, dragging: c.dragging, hasPosition: !!c.position })),
-      currentModelId: currentModel?.id,
-      isDataLoading
-    });
     
     // Check if any position changes occurred (when dragging is complete)
     const positionChanges = changes.filter(change => {
@@ -1086,26 +1219,7 @@ function CanvasComponent() {
       // We want to capture when dragging stops (dragging === false or undefined after a drag)
       const isPositionChange = change.type === 'position' && change.dragging !== true;
       
-      if (change.type === 'position') {
-        console.log('   🔍 Position change details:', {
-          id: change.id,
-          type: change.type,
-          dragging: change.dragging,
-          typeOfDragging: typeof change.dragging,
-          isDraggingNotTrue: change.dragging !== true,
-          willBeSaved: isPositionChange,
-          hasPosition: !!change.position,
-          position: change.position
-        });
-      }
-      
       return isPositionChange;
-    });
-    
-    console.log('📍 Position changes detected:', {
-      count: positionChanges.length,
-      willTriggerAutoSave: positionChanges.length > 0 && !!currentModel?.id,
-      changes: positionChanges.map(c => ({ id: c.id, position: c.position }))
     });
     
     // Track history for position changes when dragging is complete
@@ -1125,7 +1239,6 @@ function CanvasComponent() {
       }, 200); // Slightly longer delay to avoid conflicts
     }
     if (positionChanges.length > 0) {
-      console.log('💾 queuePositionSave triggered from handleNodesChange');
       queuePositionSave('nodes_change');
     }
   }, [
@@ -1250,6 +1363,27 @@ function CanvasComponent() {
         event.preventDefault();
         redo();
       } 
+      // Copy nodes
+      else if ((event.ctrlKey || event.metaKey) && event.key === 'c') {
+        const selectedNodes = nodes.filter(node => node.selected);
+        if (selectedNodes.length > 0) {
+          event.preventDefault();
+          const selectedNodeIds = selectedNodes.map(n => n.id);
+          copyNodes(selectedNodeIds);
+          toast({
+            title: "Nodes Copied",
+            description: `${selectedNodes.length} node${selectedNodes.length > 1 ? 's' : ''} copied to clipboard`,
+          });
+        }
+      }
+      // Paste nodes
+      else if ((event.ctrlKey || event.metaKey) && event.key === 'v') {
+        const copiedNodes = getCopiedNodes();
+        if (copiedNodes.length > 0) {
+          event.preventDefault();
+          handlePasteNodes(copiedNodes);
+        }
+      }
       // Search panel toggle
       else if ((event.ctrlKey || event.metaKey) && event.key === 'f') {
         event.preventDefault();
@@ -1268,7 +1402,7 @@ function CanvasComponent() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, showAutoLayout]);
+  }, [undo, redo, showAutoLayout, nodes, copyNodes, getCopiedNodes, handlePasteNodes, toast]);
 
   // Handle zoom events from TopNavBar
   useEffect(() => {
@@ -2317,49 +2451,6 @@ function CanvasComponent() {
         connectionMode={connectionMode}
         setConnectionMode={setConnectionMode}
         saveStatus={saveStatus}
-        onSave={() => {
-          setNodes((currentNodes) => {
-            const validNodes = currentNodes.filter(node => {
-              const data = node.data || {};
-              const modelObjectId = typeof data.modelObjectId === 'number' ? data.modelObjectId : undefined;
-              const objectId = typeof data.objectId === 'number' ? data.objectId : undefined;
-              const hasIdentifier = (modelObjectId && modelObjectId > 0) || (objectId && objectId > 0);
-
-              return (
-                hasIdentifier &&
-                node.position &&
-                typeof node.position.x === 'number' &&
-                typeof node.position.y === 'number' &&
-                !isNaN(node.position.x) &&
-                !isNaN(node.position.y)
-              );
-            });
-
-            const targetModelId = currentLayerModel?.id || currentModel?.id;
-            
-            if (validNodes.length > 0 && targetModelId) {
-              const positions = validNodes.map(node => {
-                const data = node.data || {};
-                return {
-                  modelObjectId: typeof data.modelObjectId === 'number' && data.modelObjectId > 0 ? data.modelObjectId : undefined,
-                  objectId: typeof data.objectId === 'number' && data.objectId > 0 ? data.objectId : undefined,
-                  position: {
-                    x: Math.round(node.position.x * 100) / 100,
-                    y: Math.round(node.position.y * 100) / 100,
-                  }
-                };
-              });
-
-              savePositionsMutation.mutate({
-                positions,
-                modelId: targetModelId,
-                layer: currentLayer,
-              });
-            }
-            
-            return currentNodes;
-          });
-        }}
         currentLayer={currentLayer}
         onAddObject={handleAddObject}
         showAISuggestions={showAISuggestions}
@@ -2397,6 +2488,14 @@ function CanvasComponent() {
           e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-950', 'border-2', 'border-blue-300', 'border-dashed');
         }}
       >
+        {/* Loading Overlay */}
+        {isLoading && (
+          <LoadingOverlay 
+            message={`Loading ${currentLayer} layer...`}
+            size="md"
+          />
+        )}
+        
         <ReactFlow
             nodes={nodes}
             edges={edges}

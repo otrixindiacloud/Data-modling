@@ -129,15 +129,16 @@ export async function synchronizeFamilyRelationships(
       params.sourceAttributeId !== null &&
       params.targetAttributeId !== null
     ) {
+      // Use dataModelId (parent model ID) not layer ID for attribute lookup
       sourceModelAttributeId = findDataModelAttributeId(
         dataModelAttributes,
-        modelToSync.id,
+        modelToSync.dataModelId,
         sourceModelObject.id,
         params.sourceAttributeId,
       );
       targetModelAttributeId = findDataModelAttributeId(
         dataModelAttributes,
-        modelToSync.id,
+        modelToSync.dataModelId,
         targetModelObject.id,
         params.targetAttributeId,
       );
@@ -148,6 +149,7 @@ export async function synchronizeFamilyRelationships(
         if (!sourceModelAttributeId && params.sourceAttributeId) {
           const globalAttr = await storage.getAttribute(params.sourceAttributeId);
           if (globalAttr) {
+            console.log(`[RELATIONSHIP_SYNC] Creating source model attribute for global attr ${params.sourceAttributeId} in model ${modelToSync.id}`);
             const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.sourceAttributeId,
               modelObjectId: sourceModelObject.id,
@@ -162,12 +164,14 @@ export async function synchronizeFamilyRelationships(
             });
             sourceModelAttributeId = newModelAttr.id;
             dataModelAttributes.push(newModelAttr);
+            console.log(`[RELATIONSHIP_SYNC] Created source model attribute with ID ${sourceModelAttributeId}`);
           }
         }
         
         if (!targetModelAttributeId && params.targetAttributeId) {
           const globalAttr = await storage.getAttribute(params.targetAttributeId);
           if (globalAttr) {
+            console.log(`[RELATIONSHIP_SYNC] Creating target model attribute for global attr ${params.targetAttributeId} in model ${modelToSync.id}`);
             const newModelAttr = await storage.createDataModelObjectAttribute({
               attributeId: params.targetAttributeId,
               modelObjectId: targetModelObject.id,
@@ -182,14 +186,29 @@ export async function synchronizeFamilyRelationships(
             });
             targetModelAttributeId = newModelAttr.id;
             dataModelAttributes.push(newModelAttr);
+            console.log(`[RELATIONSHIP_SYNC] Created target model attribute with ID ${targetModelAttributeId}`);
           }
         }
         
         if (!sourceModelAttributeId || !targetModelAttributeId) {
+          console.log(`[RELATIONSHIP_SYNC] Failed to create model attributes, downgrading to object-level`);
+          
+          // Logical and physical layers REQUIRE attribute-level relationships
+          if (modelToSync.layer === "logical" || modelToSync.layer === "physical") {
+            console.log(`[RELATIONSHIP_SYNC] Skipping ${modelToSync.layer} layer - requires attribute-level relationships`);
+            continue; // Skip this layer entirely
+          }
+          
           expectedLevel = "object";
         }
       }
     } else {
+      // Logical and physical layers REQUIRE attribute-level relationships
+      if (modelToSync.layer === "logical" || modelToSync.layer === "physical") {
+        console.log(`[RELATIONSHIP_SYNC] Skipping ${modelToSync.layer} layer - object-level relationships not allowed`);
+        continue; // Skip this layer entirely
+      }
+      
       expectedLevel = "object";
     }
 
@@ -264,6 +283,17 @@ export async function synchronizeFamilyRelationships(
       continue;
     }
 
+    console.log(
+      `[RELATIONSHIP_SYNC] Creating relationship in layer ${modelToSync.layer} (${modelToSync.id}):`,
+      {
+        expectedLevel,
+        sourceModelAttributeId,
+        targetModelAttributeId,
+        sourceHandle: params.sourceHandle,
+        targetHandle: params.targetHandle,
+      }
+    );
+
     const created = await storage.createDataModelObjectRelationship({
       sourceModelObjectId: sourceModelObject.id,
       targetModelObjectId: targetModelObject.id,
@@ -278,6 +308,15 @@ export async function synchronizeFamilyRelationships(
       name: params.name === undefined ? undefined : params.name,
       description: params.description === undefined ? undefined : params.description,
     });
+
+    console.log(
+      `[RELATIONSHIP_SYNC] Created relationship ${created.id} in layer ${modelToSync.layer}:`,
+      {
+        sourceAttributeId: created.sourceAttributeId,
+        targetAttributeId: created.targetAttributeId,
+        relationshipLevel: created.relationshipLevel,
+      }
+    );
 
     relationshipsByModelId.set(modelToSync.id, created);
     updateRelationshipCache(modelToSync.id, [...existingRelationships, created]);
@@ -311,15 +350,16 @@ export async function removeFamilyRelationships(params: RelationshipSyncInput): 
       params.sourceAttributeId !== null &&
       params.targetAttributeId !== null
     ) {
+      // Use dataModelId (parent model ID) not layer ID for attribute lookup
       sourceModelAttributeId = findDataModelAttributeId(
         dataModelAttributes,
-        modelToSync.id,
+        modelToSync.dataModelId,
         sourceModelObject.id,
         params.sourceAttributeId,
       );
       targetModelAttributeId = findDataModelAttributeId(
         dataModelAttributes,
-        modelToSync.id,
+        modelToSync.dataModelId,
         targetModelObject.id,
         params.targetAttributeId,
       );

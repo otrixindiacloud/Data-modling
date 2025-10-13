@@ -192,6 +192,13 @@ export default function LayerNavigator() {
                         }
                       }
 
+                      // Dispatch event to show layer switching indicator
+                      if (typeof window !== "undefined") {
+                        window.dispatchEvent(new CustomEvent("layerSwitchStart", {
+                          detail: { targetLayer: layer, layer }
+                        }));
+                      }
+
                       setCurrentLayer(layer);
                       
                       // No page reload needed - React Query will automatically refetch canvas data

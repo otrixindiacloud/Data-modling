@@ -184,7 +184,7 @@ export default function DataModelsListPage() {
     <div className="min-h-screen bg-muted/20 flex flex-col">
       <TopNavBar />
       <div className="flex-1 w-full">
-        <div className="max-w-6xl mx-auto px-2 sm:px-2 lg:px-4 py-8 space-y-6">
+        <div className="max-w-7xl mx-auto px-2 sm:px-2 lg:px-4 py-8 space-y-6">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
           <div className="space-y-2">
             <Badge variant="outline" className="w-fit bg-primary/5 text-primary border-primary/20 text-xs">

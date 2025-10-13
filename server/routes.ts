@@ -2499,13 +2499,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Get model attributes for all model objects in this layer
   const allModelAttributes = await storage.getDataModelObjectAttributes();
-  const modelAttributes = allModelAttributes.filter(attr => attr.modelId === layerId);
-  const modelAttributesByModelObjectId = new Map<number, typeof modelAttributes>();
-  modelAttributes.forEach((attr: typeof modelAttributes[0]) => {
+  const visibleModelObjectIds = new Set(visibleModelObjects.map((mo) => mo.id));
+  const modelAttributes = allModelAttributes.filter(
+    (attr) =>
+      visibleModelObjectIds.has(attr.modelObjectId) &&
+      attr.modelId === currentLayer.dataModelId
+  );
+  const modelAttributesByModelObjectId = new Map<number, DataModelObjectAttribute[]>();
+  for (const attr of modelAttributes) {
     const list = modelAttributesByModelObjectId.get(attr.modelObjectId) ?? [];
     list.push(attr);
     modelAttributesByModelObjectId.set(attr.modelObjectId, list);
-  });
+  }
       
   const relationships = await storage.getDataModelObjectRelationshipsByModel(layerId);
   console.log(`[CANVAS] Found ${relationships.length} relationships for layer ${layerId}`);
@@ -2669,7 +2674,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             sourceSystemId: modelObj.sourceSystemId, // Keep ID for reference
             targetSystemId: modelObj.targetSystemId, // Keep ID for reference
             attributes: modelAttrs.map((ma: any) => ({
-              id: ma.id,
+              id: ma.id,  // Model attribute ID (for internal reference)
+              attributeId: ma.attributeId,  // Global attribute ID (for handles and edges)
               name: ma.name || "Unnamed Attribute",
               conceptualType: ma.conceptualType,
               logicalType: ma.logicalType,
@@ -2694,12 +2700,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Filter relationships based on layer
       let filteredRelationships = relationships;
+      console.log(`[CANVAS] Starting with ${relationships.length} total relationships for layer ${layerId}`);
+      
       if (layerKey === "conceptual") {
-        // In conceptual layer, show only object-to-object relationships (no attribute-specific relationships)
+        // Conceptual layer: ONLY show object-to-object relationships (no attribute-specific relationships)
         filteredRelationships = relationships.filter(rel => !rel.sourceAttributeId && !rel.targetAttributeId);
+        console.log(`[CANVAS] Conceptual layer: Showing ${filteredRelationships.length} object-level relationships out of ${relationships.length} total`);
       } else if (layerKey === "logical" || layerKey === "physical") {
-        // In logical and physical layers, show only attribute-level relationships
-        filteredRelationships = relationships.filter(rel => rel.sourceAttributeId && rel.targetAttributeId);
+        // Logical and Physical layers: ONLY show attribute-level relationships
+        console.log(`[CANVAS] Filtering ${relationships.length} relationships for ${layerKey} layer`);
+        relationships.forEach(rel => {
+          console.log(`[CANVAS] Relationship ${rel.id}: ` +
+            `sourceAttrId=${rel.sourceAttributeId}, ` +
+            `targetAttrId=${rel.targetAttributeId}, ` +
+            `level=${rel.relationshipLevel}, ` +
+            `hasSource=${!!rel.sourceAttributeId}, ` +
+            `hasTarget=${!!rel.targetAttributeId}, ` +
+            `isAttribute=${rel.relationshipLevel === "attribute"}`
+          );
+        });
+        
+        // Must have BOTH source and target attribute IDs
+        filteredRelationships = relationships.filter(rel => {
+          const hasSource = !!rel.sourceAttributeId;
+          const hasTarget = !!rel.targetAttributeId;
+          const isAttribute = rel.relationshipLevel === "attribute";
+          const passes = hasSource && hasTarget && isAttribute;
+          
+          if (!passes) {
+            console.log(`[CANVAS] Filtering OUT relationship ${rel.id}: hasSource=${hasSource}, hasTarget=${hasTarget}, isAttribute=${isAttribute}`);
+          }
+          
+          return passes;
+        });
+        console.log(`[CANVAS] After filtering: ${filteredRelationships.length} attribute-level relationships`);
       }
       
       // OPTIMIZATION: Batch fetch all model attributes needed for relationships
@@ -2709,19 +2743,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (rel.targetAttributeId) uniqueModelAttrIds.add(rel.targetAttributeId);
       });
       
+      console.log(`[CANVAS] Need to fetch ${uniqueModelAttrIds.size} model attributes:`, Array.from(uniqueModelAttrIds));
+      
       const modelAttributesForRelationships = await Promise.all(
         Array.from(uniqueModelAttrIds).map(id => storage.getDataModelObjectAttribute(id))
       );
+      
+      console.log(`[CANVAS] Fetched ${modelAttributesForRelationships.length} model attributes`);
+      modelAttributesForRelationships.forEach((attr, idx) => {
+        if (attr) {
+          console.log(`  - Model attr ${attr.id}: attributeId=${attr.attributeId}, modelObjectId=${attr.modelObjectId}, modelId=${attr.modelId}`);
+        } else {
+          console.log(`  - Model attr at index ${idx}: NOT FOUND`);
+        }
+      });
+      
       const modelAttrMap = new Map(
         modelAttributesForRelationships
           .filter((attr): attr is DataModelObjectAttribute => attr !== undefined)
           .map(attr => [attr.id, attr])
       );
       
+      console.log(`[CANVAS] Built model attr map with ${modelAttrMap.size} entries`);
+      
       const edges = filteredRelationships.map(rel => {
         // Get the actual object IDs from the model objects (already in map)
         const sourceModelObject = modelObjectsById.get(rel.sourceModelObjectId);
         const targetModelObject = modelObjectsById.get(rel.targetModelObjectId);
+        
+        console.log(`[CANVAS] Processing relationship ${rel.id}:`);
+        console.log(`  - sourceModelObjectId: ${rel.sourceModelObjectId}, found: ${!!sourceModelObject}`);
+        console.log(`  - targetModelObjectId: ${rel.targetModelObjectId}, found: ${!!targetModelObject}`);
+        console.log(`  - sourceAttributeId: ${rel.sourceAttributeId}`);
+        console.log(`  - targetAttributeId: ${rel.targetAttributeId}`);
+        console.log(`  - relationshipLevel: ${rel.relationshipLevel}`);
         
         if (!sourceModelObject || !targetModelObject) {
           console.warn(`[CANVAS] Missing model objects for relationship ${rel.id}:`);
@@ -2739,11 +2794,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (rel.sourceAttributeId) {
           const sourceModelAttr = modelAttrMap.get(rel.sourceAttributeId);
           globalSourceAttributeId = sourceModelAttr?.attributeId ?? null;
+          console.log(`[CANVAS] Source attr ${rel.sourceAttributeId} -> global ${globalSourceAttributeId}`);
         }
         
         if (rel.targetAttributeId) {
           const targetModelAttr = modelAttrMap.get(rel.targetAttributeId);
           globalTargetAttributeId = targetModelAttr?.attributeId ?? null;
+          console.log(`[CANVAS] Target attr ${rel.targetAttributeId} -> global ${globalTargetAttributeId}`);
         }
 
         const relationshipLevel = rel.relationshipLevel === "attribute" ? "attribute" : "object";

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Menu, ArrowLeft, PanelLeftClose, PanelLeftOpen, LogOut } from "lucide-react";
+import { Undo, Redo, ZoomIn, ZoomOut, Maximize, Download, Menu, ArrowLeft, PanelLeftClose, PanelLeftOpen, LogOut, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useModelerStore } from "@/store/modelerStore";
 import AddDataModelModal from "@/components/modals/AddDataModelModal";
@@ -10,7 +10,12 @@ import { useLocation } from "wouter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function TopNavBar() {
+interface TopNavBarProps {
+  onSaveCanvas?: () => void;
+  canvasSaveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+}
+
+export default function TopNavBar({ onSaveCanvas, canvasSaveStatus = 'idle' }: TopNavBarProps) {
   const {
     currentModel,
     setShowExportModal,
@@ -49,6 +54,19 @@ export default function TopNavBar() {
   const handleLogout = async () => {
     await logout();
     setLocation("/auth/login");
+  };
+
+  const getSaveLabel = () => {
+    switch (canvasSaveStatus) {
+      case 'saving':
+        return 'Saving...';
+      case 'saved':
+        return 'Saved';
+      case 'error':
+        return 'Retry Save';
+      default:
+        return 'Save';
+    }
   };
 
   useEffect(() => {
@@ -258,7 +276,29 @@ export default function TopNavBar() {
           </Tooltip>
         </div>
 
-        {/* Export Button */}
+        {/* Save & Export Buttons */}
+        {isModelerRoute && onSaveCanvas && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onSaveCanvas}
+                size="sm"
+                variant="outline"
+                className={`font-medium touch-target text-foreground transition-all duration-200 shadow-soft hover:shadow-medium ${canvasSaveStatus === 'saved' ? 'border-green-300 text-green-700 bg-green-50 dark:bg-green-950 dark:text-green-300' : ''} ${canvasSaveStatus === 'error' ? 'border-red-300 text-red-700 bg-red-50 dark:bg-red-950 dark:text-red-300' : ''}`}
+                disabled={canvasSaveStatus === 'saving'}
+                data-testid="button-save-canvas-header"
+              >
+                <Save className={`w-4 h-4 mr-1 lg:mr-2 ${canvasSaveStatus === 'saving' ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{getSaveLabel()}</span>
+                <span className="sm:hidden">Save</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Save current canvas changes</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {isModelerRoute && (
           <Tooltip>
             <TooltipTrigger asChild>

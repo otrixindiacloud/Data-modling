@@ -32,7 +32,8 @@ export interface CanvasEdge {
 }
 
 export interface AttributeData {
-  id: number;
+  id: number; // Model attribute ID (from data_model_object_attributes)
+  attributeId?: number; // Global attribute ID (from data_object_attributes) - used for handles
   name: string;
   conceptualType?: string;
   logicalType?: string;

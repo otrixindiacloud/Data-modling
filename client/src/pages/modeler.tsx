@@ -16,6 +16,8 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { usePanelWidths } from "@/hooks/usePanelWidths";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ImprovedModelPicker from "@/components/ImprovedModelPicker";
+import LayerSwitchingIndicator from "@/components/LayerSwitchingIndicator";
+import LoadingOverlay from "@/components/LoadingOverlay";
 import { Badge } from "@/components/ui/badge";
 import { useRoute } from "wouter";
 import type { DataModel } from "@shared/schema";
@@ -75,6 +77,8 @@ export default function ModelerPage() {
   const [showModelRequiredModal, setShowModelRequiredModal] = useState(false);
   const [modelRequiredMessage, setModelRequiredMessage] = useState<string | null>(null);
   const [canvasSaveStatus, setCanvasSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [isLayerSwitching, setIsLayerSwitching] = useState(false);
+  const [targetLayer, setTargetLayer] = useState<string | undefined>(undefined);
 
   // Handler to trigger manual canvas save
   const handleSaveCanvas = () => {
@@ -84,17 +88,17 @@ export default function ModelerPage() {
   };
 
   // Load domains
-  const { data: domains } = useQuery({
+  const { data: domains, isLoading: isLoadingDomains } = useQuery({
     queryKey: ["/api/domains"],
   });
 
   // Load data sources
-  const { data: dataSources } = useQuery({
+  const { data: dataSources, isLoading: isLoadingDataSources } = useQuery({
     queryKey: ["/api/sources"],
   });
 
   // Load data areas
-  const { data: dataAreas } = useQuery({
+  const { data: dataAreas, isLoading: isLoadingDataAreas } = useQuery({
     queryKey: ["/api/areas"],
     queryFn: async () => {
       const response = await fetch("/api/areas");
@@ -108,9 +112,11 @@ export default function ModelerPage() {
   });
 
   // Load models and set the first one as current if none selected
-  const { data: models } = useQuery({
+  const { data: models, isLoading: isLoadingModels } = useQuery({
     queryKey: ["/api/models"],
   });
+
+  const isPageLoading = isLoadingDomains || isLoadingDataSources || isLoadingDataAreas || isLoadingModels;
 
   const conceptualModels = useMemo(() => {
     if (!Array.isArray(models)) return [];
@@ -282,6 +288,54 @@ export default function ModelerPage() {
     };
   }, []);
 
+  // Listen for layer switching events dispatched by LayerNavigator and Canvas
+  useEffect(() => {
+    const handleLayerSwitchStart = (event: CustomEvent) => {
+      const layerName = typeof event.detail?.targetLayer === 'string'
+        ? event.detail.targetLayer
+        : typeof event.detail?.layer === 'string'
+          ? event.detail.layer
+          : undefined;
+
+      setIsLayerSwitching(true);
+      setTargetLayer(layerName);
+    };
+
+    const handleLayerSwitchComplete = (event: CustomEvent) => {
+      setIsLayerSwitching(false);
+
+      const layerName = typeof event.detail?.layer === 'string'
+        ? event.detail.layer
+        : undefined;
+
+      setTargetLayer(layerName);
+    };
+
+    window.addEventListener('layerSwitchStart', handleLayerSwitchStart as EventListener);
+    window.addEventListener('layerSwitchLoading', handleLayerSwitchStart as EventListener);
+    window.addEventListener('layerSwitchComplete', handleLayerSwitchComplete as EventListener);
+
+    return () => {
+      window.removeEventListener('layerSwitchStart', handleLayerSwitchStart as EventListener);
+      window.removeEventListener('layerSwitchLoading', handleLayerSwitchStart as EventListener);
+      window.removeEventListener('layerSwitchComplete', handleLayerSwitchComplete as EventListener);
+    };
+  }, []);
+
+  // Fallback: ensure the indicator never stays visible indefinitely
+  useEffect(() => {
+    if (!isLayerSwitching) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setIsLayerSwitching(false);
+      setTargetLayer(undefined);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [isLayerSwitching]);
+
   const handleToggleDataExplorer = () => {
     setDataExplorerCollapsed(!dataExplorerCollapsed);
   };
@@ -290,18 +344,27 @@ export default function ModelerPage() {
     setPropertiesCollapsed((prev) => !prev);
   };
 
-    const handleLayerChange = (layer: ModelLayer) => {
-    setCurrentLayer(layer);
-    console.log("Layer changed to:", layer);
-  };
-
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background min-h-0">
-      <TopNavBar />
+      {/* Page Loading Indicator */}
+      {isPageLoading && (
+        <LoadingOverlay 
+          message="Loading modeler workspace..."
+          size="lg"
+          fullScreen={true}
+        />
+      )}
       
+      <TopNavBar onSaveCanvas={handleSaveCanvas} canvasSaveStatus={canvasSaveStatus} />
       
+      {/* Layer Switching Indicator */}
+      <LayerSwitchingIndicator 
+        isVisible={isLayerSwitching} 
+        targetLayer={targetLayer}
+      />
+
       <div className="flex-1 min-h-0 relative">
-  <Dialog open={showModelRequiredModal} onOpenChange={setShowModelRequiredModal} modal>
+        <Dialog open={showModelRequiredModal} onOpenChange={setShowModelRequiredModal} modal>
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Select a model to get started</DialogTitle>
@@ -403,8 +466,6 @@ export default function ModelerPage() {
                 <EnhancedPropertiesPanel
                   isCollapsed={propertiesCollapsed}
                   onToggleCollapse={handleToggleProperties}
-                  onSaveCanvas={handleSaveCanvas}
-                  canvasSaveStatus={canvasSaveStatus}
                 />
               </div>
             </Panel>
@@ -528,8 +589,6 @@ export default function ModelerPage() {
             <div className="h-full overflow-hidden">
               <EnhancedPropertiesPanel 
                 onClose={() => setShowMobileProperties(false)} 
-                onSaveCanvas={handleSaveCanvas}
-                canvasSaveStatus={canvasSaveStatus}
               />
             </div>
           </SheetContent>

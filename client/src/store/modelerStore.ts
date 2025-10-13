@@ -142,6 +142,9 @@ interface ModelerState {
   history: HistoryEntry[];
   historyIndex: number;
   
+  // Clipboard for copy-paste
+  copiedNodes: CanvasNode[];
+  
   // Actions
   setCurrentModel: (model: DataModel | null) => void;
   setCurrentLayer: (layer: ModelLayer) => void;
@@ -182,6 +185,11 @@ interface ModelerState {
   clearHistory: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  
+  // Clipboard actions
+  copyNodes: (nodeIds: string[]) => void;
+  getCopiedNodes: () => CanvasNode[];
+  clearCopiedNodes: () => void;
 }
 
 export const useModelerStore = create<ModelerState>()(
@@ -204,6 +212,7 @@ export const useModelerStore = create<ModelerState>()(
     aiSuggestions: [],
     history: [],
     historyIndex: -1,
+    copiedNodes: [],
 
     // Model actions
     setCurrentModel: (model) =>
@@ -444,5 +453,19 @@ export const useModelerStore = create<ModelerState>()(
       const state = get();
       return state.historyIndex < state.history.length - 1;
     },
+
+    // Clipboard actions
+    copyNodes: (nodeIds) =>
+      set((state) => {
+        const nodesToCopy = state.nodes.filter(node => nodeIds.includes(node.id));
+        return { copiedNodes: nodesToCopy };
+      }),
+
+    getCopiedNodes: () => {
+      const state = get();
+      return state.copiedNodes;
+    },
+
+    clearCopiedNodes: () => set({ copiedNodes: [] }),
   }))
 );

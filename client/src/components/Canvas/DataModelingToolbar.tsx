@@ -35,7 +35,6 @@ interface DataModelingToolbarProps {
   connectionMode: 'selection' | 'connection';
   setConnectionMode: (mode: 'selection' | 'connection') => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
-  onSave: () => void;
   currentLayer: string;
   onAddObject: () => void;
   showAISuggestions: boolean;
@@ -49,7 +48,6 @@ export default function DataModelingToolbar({
   connectionMode,
   setConnectionMode,
   saveStatus,
-  onSave,
   currentLayer,
   onAddObject,
   showAISuggestions,
@@ -90,15 +88,6 @@ export default function DataModelingToolbar({
         break;
     }
     setIsLayoutMenuOpen(false);
-  };
-
-  const getSaveStatusColor = () => {
-    switch (saveStatus) {
-      case 'saving': return 'text-yellow-600';
-      case 'saved': return 'text-green-600';
-      case 'error': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
   };
 
   const getSaveStatusText = () => {
@@ -195,23 +184,6 @@ export default function DataModelingToolbar({
                   </Button>
                 )}
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onSave();
-                    setIsToolboxOpen(false);
-                  }}
-                  disabled={saveStatus === 'saving'}
-                  className={`w-full justify-start touch-target ${
-                    saveStatus === 'saved' ? 'bg-green-50 border-green-200 text-green-700 dark:bg-green-950' 
-                    : saveStatus === 'error' ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-950'
-                    : ''
-                  }`}
-                >
-                  <Save className={`h-4 w-4 mr-2 ${saveStatus === 'saving' ? 'animate-spin' : ''}`} />
-                  {getSaveStatusText()}
-                </Button>
               </div>
             </div>
 

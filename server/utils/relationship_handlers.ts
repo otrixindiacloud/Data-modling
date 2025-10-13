@@ -81,9 +81,75 @@ export async function createRelationship(
   }
 
   // Store the global attribute IDs for the data_object_relationships table
-  const globalSourceAttributeId = validatedPayload.sourceAttributeId ?? null;
-  const globalTargetAttributeId = validatedPayload.targetAttributeId ?? null;
+  const attributeCache = new Map<number, number | null>();
+  const resolveGlobalAttributeId = async (
+    attributeId: number | null | undefined,
+    role: "source" | "target",
+  ): Promise<number | null> => {
+    if (attributeId === null || attributeId === undefined) {
+      return null;
+    }
+
+    if (attributeCache.has(attributeId)) {
+      return attributeCache.get(attributeId) ?? null;
+    }
+
+    // Most inputs from the canvas are data_model_object_attribute IDs, so try mapping them first
+    const modelAttribute = await storage.getDataModelObjectAttribute(attributeId);
+    if (modelAttribute) {
+      if (modelAttribute.attributeId) {
+        const globalAttribute = await storage.getAttribute(modelAttribute.attributeId);
+        if (globalAttribute) {
+          attributeCache.set(attributeId, modelAttribute.attributeId);
+          return modelAttribute.attributeId;
+        }
+
+        console.warn(
+          `[RELATIONSHIP] Global attribute ${modelAttribute.attributeId} referenced by model attribute ${attributeId} (${role}) was not found; downgrading relationship level.`,
+        );
+        attributeCache.set(attributeId, null);
+        return null;
+      }
+
+      console.warn(
+        `[RELATIONSHIP] Model attribute ${attributeId} (${role}) is missing a global attribute mapping; downgrading relationship level.`,
+      );
+      attributeCache.set(attributeId, null);
+      return null;
+    }
+
+    // Fall back to assuming the ID is already a global attribute ID
+    const globalAttribute = await storage.getAttribute(attributeId);
+    if (globalAttribute) {
+      attributeCache.set(attributeId, attributeId);
+      return attributeId;
+    }
+
+    console.warn(
+      `[RELATIONSHIP] Unable to resolve attribute ID ${attributeId} (${role}) to a global attribute; downgrading relationship level.`,
+    );
+    attributeCache.set(attributeId, null);
+    return null;
+  };
+
+  const [globalSourceAttributeId, globalTargetAttributeId] = await Promise.all([
+    resolveGlobalAttributeId(validatedPayload.sourceAttributeId ?? null, "source"),
+    resolveGlobalAttributeId(validatedPayload.targetAttributeId ?? null, "target"),
+  ]);
+
+  console.log(
+    `[RELATIONSHIP] Normalized attribute IDs -> source: ${globalSourceAttributeId}, target: ${globalTargetAttributeId}`,
+  );
+
   const relationshipLevel = determineRelationshipLevel(globalSourceAttributeId, globalTargetAttributeId);
+
+  // Enforce: Logical and Physical layers MUST have attribute-level relationships
+  if ((model.layer === "logical" || model.layer === "physical") && relationshipLevel === "object") {
+    throw new Error(
+      `Object-level relationships are not allowed in ${model.layer} layer. ` +
+      `Please select specific attributes to create an attribute-level relationship.`
+    );
+  }
 
   const existingGlobalRelationships = await storage.getDataObjectRelationshipsByObject(validatedPayload.sourceObjectId);
   let dataObjectRelationship = findMatchingDataObjectRelationship(
